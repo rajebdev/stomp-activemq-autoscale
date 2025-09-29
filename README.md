@@ -607,6 +607,8 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 urlencoding = "2.1"
 ```
 
+
+## 🤝 Contributing
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
