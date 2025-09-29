@@ -1,0 +1,28 @@
+[package]
+name = "stomp-activemq-autoscale"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "stomp_activemq_autoscale"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stomp_activemq_autoscale"
+path = "src/main.rs"
+
+[dependencies]
+tokio-stomp-2 = "0.3.0"
+tokio = { version = "1.32", features = ["full", "signal"] }
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+urlencoding = "2.1"

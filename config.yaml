@@ -1,0 +1,71 @@
+# STOMP Service Configuration
+# Simplified version with unified ActiveMQ configuration
+
+# Service metadata
+service:
+  name: "stomp-service"
+  version: "1.0.0"
+  description: "Production STOMP messaging service"
+
+# Unified ActiveMQ server configuration
+# This replaces both 'broker' and 'monitoring.activemq' sections
+activemq:
+  host: "10.0.7.127"
+  username: "admin"
+  password: "admin"
+  
+  # Protocol-specific ports
+  stomp_port: 31333       # STOMP messaging port
+  web_port: 8131          # Web console/monitoring port
+  
+  # Connection settings
+  heartbeat_secs: 30      # Heartbeat interval
+  broker_name: "localhost" # ActiveMQ broker name
+
+# Message destinations
+destinations:
+  # Queue configurations - only specify if custom path needed
+  queues:
+    default: "/queue/demo"
+    modern_major_general_0: "/queue/modern_major_general_0"
+    api_requests: "/queue/api.requests"
+    errorsx: "/queue/errorsx"
+  
+  # Topic configurations
+  topics:
+    notifications: "/topic/notifications"
+    events: "/topic/events"
+
+# Auto-scaling configuration
+scaling:
+  # Enable/disable auto-scaling
+  enabled: true
+  
+  # Monitoring interval
+  interval_secs: 5
+  
+  # Worker scaling rules per queue
+  # Format: "min-max" for auto-scaling or "count" for fixed workers
+  workers:
+    default: "1-4"                    # Auto-scaling: 1-4 workers
+    modern_major_general_0: "1-2"     # Auto-scaling: 1-2 workers  
+    api_requests: "2-6"               # Auto-scaling: 2-6 workers
+    errorsx: "2"                      # Fixed: exactly 2 workers
+
+# Optional: Override defaults only if needed
+# consumers:
+#   ack_mode: "client_individual"   # Default: client_individual
+
+# logging:
+#   level: "info"                   # Default: info, use RUST_LOG env var instead
+#   output: "stdout"                # Default: stdout
+
+# retry:
+#   max_attempts: -1                # Default: infinite retries
+#   initial_delay_ms: 1000          # Default: 1 second
+#   max_delay_ms: 30000             # Default: 30 seconds
+#   backoff_multiplier: 2.0         # Default: exponential backoff
+
+# shutdown:
+#   timeout_secs: 30                # Default: 30 seconds
+#   grace_period_secs: 5            # Default: 5 seconds
