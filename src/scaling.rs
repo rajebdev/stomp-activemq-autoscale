@@ -128,7 +128,7 @@ impl ScalingEngine {
         let worker_range = history.worker_range.clone();
         
         // Release mutable borrow by getting history again
-        drop(history);
+        let _ = history;
 
         // Make scaling decision based on current metrics
         let decision = self.make_scaling_decision(queue_name, &metrics, current_workers, &worker_range);
