@@ -36,4 +36,4 @@ Thumbs.db
 *.log
 
 # Configuration (keep the sample)
-config.yaml.local
+config.yaml
