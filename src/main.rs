@@ -1,6 +1,6 @@
 use anyhow::Result;
-use stomp_app_with_auto_scalling::runner::StompRunner;
-use stomp_app_with_auto_scalling::utils;
+use stomp_activemq_autoscale::runner::StompRunner;
+use stomp_activemq_autoscale::utils;
 use tracing::debug;
 
 // Custom handler for processing order messages

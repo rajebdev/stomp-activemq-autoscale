@@ -12,7 +12,7 @@ name = "stomp_activemq_autoscale"
 path = "src/main.rs"
 
 [dependencies]
-tokio-stomp-2 = "0.3.0"
+stomp = { git = "https://github.com/rajebdev/stomp-rs", branch = "master" }
 tokio = { version = "1.32", features = ["full", "signal"] }
 futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }

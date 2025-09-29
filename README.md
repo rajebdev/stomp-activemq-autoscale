@@ -154,7 +154,7 @@ cargo run
 
 # Or build first, then run
 cargo build --release
-./target/release/stomp_app_with_auto_scalling
+./target/release/stomp_activemq_autoscale
 ```
 
 ### ✨ Quick Start with Auto-Scaling
