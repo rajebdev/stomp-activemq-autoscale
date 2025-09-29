@@ -399,9 +399,7 @@ pub struct QueueStatus {
 mod tests {
     use super::*;
     use crate::config::*;
-    use crate::consumer_pool::MessageHandler;
     use std::collections::HashMap;
-    use std::pin::Pin;
     use tokio::sync::broadcast;
 
     fn create_test_config() -> Config {
@@ -448,13 +446,6 @@ mod tests {
             },
             retry: RetryConfig::default(),
         }
-    }
-
-    fn create_test_handler() -> Box<MessageHandler> {
-        Box::new(|_msg: String| {
-            Box::pin(async move { Ok(()) })
-                as Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
-        })
     }
 
     #[tokio::test]
