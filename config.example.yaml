@@ -1,0 +1,94 @@
+# STOMP Auto-Scaling Service Configuration Template
+# Copy this file to config.yaml and update with your settings
+
+# Service metadata
+service:
+  name: "stomp-service"
+  version: "1.0.0"
+  description: "Production STOMP messaging service"
+
+# ActiveMQ server configuration
+# Replace with your actual ActiveMQ server details
+activemq:
+  host: "localhost"                    # ActiveMQ server hostname or IP
+  username: "admin"                    # STOMP authentication username
+  password: "admin"                    # STOMP authentication password
+  stomp_port: 61613                   # STOMP messaging port (default: 61613)
+  web_port: 8161                      # ActiveMQ web console port (default: 8161)
+  heartbeat_secs: 30                  # Connection heartbeat interval in seconds
+  broker_name: "localhost"            # ActiveMQ broker name (usually "localhost")
+
+# Message destinations
+destinations:
+  # Queue configurations - competing consumers (load balancing)
+  queues:
+    default: "/queue/demo"             # Default queue for general messages
+    orders: "/queue/orders"            # Order processing queue
+    api_requests: "/queue/api.requests" # API request handling queue
+    errors: "/queue/errors"            # Error handling queue
+    notifications: "/queue/notifications" # Notification queue
+  
+  # Topic configurations - broadcast to all subscribers
+  topics:
+    events: "/topic/events"            # System events topic
+    alerts: "/topic/alerts"            # Alert notifications topic
+    logs: "/topic/logs"                # Log broadcasting topic
+
+# Auto-scaling configuration
+scaling:
+  enabled: true                       # Enable/disable auto-scaling
+  interval_secs: 5                    # Monitor queue metrics every N seconds
+  
+  # Worker scaling rules per queue
+  # Format: "min-max" for auto-scaling or "count" for fixed workers
+  workers:
+    # Auto-scaling examples (format: "min-max")
+    default: "1-4"                    # Scale between 1-4 workers based on queue depth
+    orders: "2-8"                     # Always have 2+ workers, scale up to 8 under load
+    api_requests: "3-10"              # High-priority queue with 3-10 workers
+    
+    # Fixed worker count examples (format: "count")  
+    errors: "2"                       # Always exactly 2 error handlers
+    notifications: "1"                # Single notification processor
+
+# Optional: Advanced configuration (uncomment and modify if needed)
+
+# Message consumer settings
+# consumers:
+#   ack_mode: "client_individual"     # Message acknowledgment mode
+                                     # Options: auto, client, client_individual
+
+# Retry and reconnection behavior
+# retry:
+#   max_attempts: -1                  # Retry attempts (-1 = infinite, 0 = no retry)
+#   initial_delay_ms: 1000           # Initial retry delay in milliseconds
+#   max_delay_ms: 30000              # Maximum retry delay in milliseconds  
+#   backoff_multiplier: 2.0          # Exponential backoff multiplier
+
+# Graceful shutdown configuration
+# shutdown:
+#   timeout_secs: 30                 # Maximum time to wait for shutdown
+#   grace_period_secs: 5             # Grace period for cleanup operations
+
+# Logging configuration (prefer using RUST_LOG environment variable)
+# logging:
+#   level: "info"                    # Log level: trace, debug, info, warn, error
+#   output: "stdout"                 # Output destination
+
+# Environment Variable Examples:
+# You can override any configuration using environment variables:
+#
+# export ACTIVEMQ_HOST=production-broker.company.com
+# export ACTIVEMQ_STOMP_PORT=61613
+# export ACTIVEMQ_USERNAME=prod_service_account
+# export ACTIVEMQ_PASSWORD=secure_password_here
+# export SCALING_ENABLED=true
+# export SCALING_INTERVAL_SECS=10
+# export RUST_LOG=info
+
+# Production Tips:
+# 1. Never commit config.yaml with real credentials to version control
+# 2. Use environment variables for sensitive data in production
+# 3. Monitor queue depths to optimize worker min/max ranges
+# 4. Test scaling behavior with realistic message loads
+# 5. Set appropriate heartbeat intervals for your network conditions
