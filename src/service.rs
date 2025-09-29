@@ -905,20 +905,20 @@ mod tests {
                 version: "1.0.0".to_string(),
                 description: "Test service".to_string(),
             },
-            broker: BrokerConfig {
+            activemq: ActiveMQConfig {
                 host: "localhost".to_string(),
-                port: 61613,
-                credentials: None,
-                heartbeat: HeartbeatConfig {
-                    client_send_secs: 30,
-                    client_receive_secs: 30,
-                },
-                headers: HashMap::new(),
+                stomp_port: 61613,
+                web_port: 8161,
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
             },
             destinations: DestinationsConfig {
                 queues: HashMap::new(),
                 topics: HashMap::new(),
             },
+            scaling: ScalingConfig::default(),
             consumers: ConsumersConfig {
                 ack_mode: "client_individual".to_string(),
             },
@@ -936,7 +936,6 @@ mod tests {
                 max_delay_ms: 1000,
                 backoff_multiplier: 2.0,
             },
-            monitoring: None,
         }
     }
 }

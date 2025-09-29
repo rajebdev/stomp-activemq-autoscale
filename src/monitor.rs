@@ -263,16 +263,16 @@ impl ActiveMQMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::CredentialsConfig;
 
-    fn create_test_config() -> ActiveMQMonitoringConfig {
-        ActiveMQMonitoringConfig {
-            base_url: "http://localhost:8161".to_string(),
+    fn create_test_config() -> ActiveMQConfig {
+        ActiveMQConfig {
+            host: "localhost".to_string(),
+            stomp_port: 61613,
+            web_port: 8161,
+            username: "admin".to_string(),
+            password: "admin".to_string(),
+            heartbeat_secs: 30,
             broker_name: "localhost".to_string(),
-            credentials: Some(CredentialsConfig {
-                username: "admin".to_string(),
-                password: "admin".to_string(),
-            }),
         }
     }
 

@@ -361,26 +361,26 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-broker:
+activemq:
   host: "localhost"
-  port: 61613
-  credentials:
-    username: "admin"
-    password: "admin"
-  heartbeat:
-    client_send_secs: 30
-    client_receive_secs: 30
-  headers: {}
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+  broker_name: "localhost"
 
 destinations:
   queues:
-    test:
-      path: "/queue/test"
-      headers: {}
+    test: "/queue/test"
   topics:
-    notifications:
-      path: "/topic/notifications"
-      headers: {}
+    notifications: "/topic/notifications"
+
+scaling:
+  enabled: true
+  interval_secs: 5
+  workers:
+    test: "1-3"
 
 consumers:
   ack_mode: "client_individual"
@@ -402,8 +402,8 @@ retry:
 
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();
         assert_eq!(config.service.name, "test-service");
-        assert_eq!(config.broker.host, "localhost");
-        assert_eq!(config.broker.port, 61613);
+        assert_eq!(config.activemq.host, "localhost");
+        assert_eq!(config.activemq.stomp_port, 61613);
 
         let (username, password) = config.get_credentials().unwrap();
         assert_eq!(username, "admin");
@@ -462,26 +462,26 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-broker:
+activemq:
   host: "localhost"
-  port: 61613
-  heartbeat:
-    client_send_secs: 30
-    client_receive_secs: 30
-  headers: {}
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+  broker_name: "localhost"
 
 destinations:
   queues:
-    default:
-      path: "/queue/demo"
-      headers: {}
-    api_requests:
-      path: "/queue/api.requests"
-      headers: {}
-    errors:
-      path: "/queue/errors"
-      headers: {}
+    default: "/queue/demo"
+    api_requests: "/queue/api.requests"
+    errors: "/queue/errors"
   topics: {}
+
+scaling:
+  enabled: false
+  interval_secs: 5
+  workers: {}
 
 consumers:
   ack_mode: "client_individual"
@@ -525,20 +525,26 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-broker:
+activemq:
   host: "localhost"
-  port: 61613
-  heartbeat:
-    client_send_secs: 30
-    client_receive_secs: 30
-  headers: {}
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+  broker_name: "localhost"
 
 destinations:
   queues:
-    test_queue:
-      path: "/queue/test"
-      headers: {}
+    test_queue: "/queue/test"
   topics: {}
+
+scaling:
+  enabled: true
+  interval_secs: 5
+  workers:
+    auto_scaling_queue: "1-4"
+    fixed_queue: "3"
 
 consumers:
   ack_mode: "client_individual"
@@ -550,17 +556,6 @@ logging:
 shutdown:
   timeout_secs: 30
   grace_period_secs: 5
-
-monitoring:
-  enable: true
-  activemq:
-    base_url: "http://localhost:8161"
-    broker_name: "localhost"
-  scaling:
-    interval_secs: 5
-    worker_per_queue:
-      auto_scaling_queue: "1-4"
-      fixed_queue: "3"
         "#;
 
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();
@@ -597,20 +592,26 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-broker:
+activemq:
   host: "localhost"
-  port: 61613
-  heartbeat:
-    client_send_secs: 30
-    client_receive_secs: 30
-  headers: {}
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+  broker_name: "localhost"
 
 destinations:
   queues:
-    test_queue:
-      path: "/queue/test"
-      headers: {}
+    test_queue: "/queue/test"
   topics: {}
+
+scaling:
+  enabled: false
+  interval_secs: 5
+  workers:
+    auto_scaling_queue: "1-4"
+    fixed_queue: "3"
 
 consumers:
   ack_mode: "client_individual"
@@ -622,17 +623,6 @@ logging:
 shutdown:
   timeout_secs: 30
   grace_period_secs: 5
-
-monitoring:
-  enable: false
-  activemq:
-    base_url: "http://localhost:8161"
-    broker_name: "localhost"
-  scaling:
-    interval_secs: 5
-    worker_per_queue:
-      auto_scaling_queue: "1-4"
-      fixed_queue: "3"
         "#;
 
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();

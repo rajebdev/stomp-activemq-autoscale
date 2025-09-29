@@ -405,22 +405,14 @@ mod tests {
     use tokio::sync::broadcast;
 
     fn create_test_config() -> Config {
-        let mut monitoring_config = MonitoringConfig {
-            enable: true,
-            activemq: ActiveMQMonitoringConfig {
-                base_url: "http://localhost:8161".to_string(),
-                broker_name: "localhost".to_string(),
-                credentials: None,
-            },
-            scaling: ScalingConfig {
-                interval_secs: 5,
-                worker_per_queue: HashMap::new(),
-            },
+        let mut scaling_config = ScalingConfig {
+            enabled: true,
+            interval_secs: 5,
+            workers: HashMap::new(),
         };
 
-        monitoring_config
-            .scaling
-            .worker_per_queue
+        scaling_config
+            .workers
             .insert("test".to_string(), "1-3".to_string());
 
         Config {
@@ -429,20 +421,20 @@ mod tests {
                 version: "1.0.0".to_string(),
                 description: "Test service".to_string(),
             },
-            broker: BrokerConfig {
+            activemq: ActiveMQConfig {
                 host: "localhost".to_string(),
-                port: 61613,
-                credentials: None,
-                heartbeat: HeartbeatConfig {
-                    client_send_secs: 30,
-                    client_receive_secs: 30,
-                },
-                headers: HashMap::new(),
+                stomp_port: 61613,
+                web_port: 8161,
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
             },
             destinations: DestinationsConfig {
                 queues: HashMap::new(),
                 topics: HashMap::new(),
             },
+            scaling: scaling_config,
             consumers: ConsumersConfig {
                 ack_mode: "client_individual".to_string(),
             },
@@ -455,7 +447,6 @@ mod tests {
                 grace_period_secs: 5,
             },
             retry: RetryConfig::default(),
-            monitoring: Some(monitoring_config),
         }
     }
 
