@@ -352,10 +352,11 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
-    #[test]
-    fn test_config_parsing() {
-        let yaml_content = r#"
+    fn create_test_config_yaml() -> &'static str {
+        r#"
 service:
   name: "test-service"
   version: "1.0.0"
@@ -398,7 +399,12 @@ retry:
   initial_delay_ms: 500
   max_delay_ms: 5000
   backoff_multiplier: 2.0
-        "#;
+        "#
+    }
+
+    #[test]
+    fn test_config_parsing() {
+        let yaml_content = create_test_config_yaml();
 
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();
         assert_eq!(config.service.name, "test-service");
@@ -436,6 +442,72 @@ retry:
     }
 
     #[test]
+    fn test_config_load_from_file() {
+        let yaml_content = create_test_config_yaml();
+        
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "{}", yaml_content).unwrap();
+
+        let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
+        assert_eq!(config.service.name, "test-service");
+        assert_eq!(config.activemq.host, "localhost");
+    }
+
+    #[test]
+    fn test_config_load_nonexistent_file() {
+        let result = Config::load("nonexistent_file.yaml");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to read config file"));
+    }
+
+    #[test]
+    fn test_config_load_invalid_yaml() {
+        let invalid_yaml = "invalid: yaml: content: [unclosed";
+        
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "{}", invalid_yaml).unwrap();
+
+        let result = Config::load(temp_file.path().to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to parse config file"));
+    }
+
+    #[test]
+    fn test_config_with_defaults() {
+        let minimal_yaml = r#"
+service:
+  name: "minimal-service"
+  version: "1.0.0"
+  description: "Minimal service"
+
+activemq:
+  host: "localhost"
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+
+destinations:
+  queues: {}
+  topics: {}
+        "#;
+
+        let config: Config = serde_yaml::from_str(minimal_yaml).unwrap();
+        
+        // Check that defaults are applied correctly
+        assert_eq!(config.activemq.broker_name, "localhost");
+        assert!(config.scaling.enabled);
+        assert_eq!(config.scaling.interval_secs, 5);
+        assert_eq!(config.consumers.ack_mode, "client_individual");
+        assert_eq!(config.logging.level, "info");
+        assert_eq!(config.logging.output, "stdout");
+        assert_eq!(config.shutdown.timeout_secs, 30);
+        assert_eq!(config.shutdown.grace_period_secs, 5);
+        assert_eq!(config.retry.max_attempts, -1);
+    }
+
+    #[test]
     fn test_retry_config_default() {
         let retry_config = RetryConfig::default();
         assert_eq!(retry_config.max_attempts, -1); // Default is now infinite retries (-1)
@@ -452,6 +524,161 @@ retry:
         assert!(retry_config.should_retry(100));
         assert!(retry_config.should_retry(1000000)); // Should always retry with infinite retries
         assert!(retry_config.max_attempts == -1); // Should be -1 for infinite retries
+    }
+
+    #[test]
+    fn test_retry_config_edge_cases() {
+        // Test with zero attempts
+        let retry_config = RetryConfig {
+            max_attempts: 0,
+            initial_delay_ms: 1000,
+            max_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+        };
+        assert!(!retry_config.should_retry(0));
+        assert!(!retry_config.should_retry(1));
+
+        // Test with zero delay
+        let zero_delay_config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 0,
+            max_delay_ms: 1000,
+            backoff_multiplier: 2.0,
+        };
+        let delay = zero_delay_config.calculate_delay(0);
+        assert_eq!(delay.as_millis(), 0);
+
+        // Test with large multiplier
+        let large_multiplier_config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 1000,
+            backoff_multiplier: 10.0,
+        };
+        let delay = large_multiplier_config.calculate_delay(2);
+        assert_eq!(delay.as_millis(), 1000); // Should be capped at max_delay_ms
+    }
+
+    #[test]
+    fn test_parse_worker_config_valid() {
+        // Test range format
+        let range_result = Config::parse_worker_config("1-4").unwrap();
+        assert_eq!(range_result.min, 1);
+        assert_eq!(range_result.max, 4);
+        assert!(!range_result.is_fixed);
+
+        // Test fixed format
+        let fixed_result = Config::parse_worker_config("3").unwrap();
+        assert_eq!(fixed_result.min, 3);
+        assert_eq!(fixed_result.max, 3);
+        assert!(fixed_result.is_fixed);
+
+        // Test single digit range
+        let single_range = Config::parse_worker_config("0-1").unwrap();
+        assert_eq!(single_range.min, 0);
+        assert_eq!(single_range.max, 1);
+        assert!(!single_range.is_fixed);
+    }
+
+    #[test]
+    fn test_parse_worker_config_invalid() {
+        // Test invalid range format
+        assert!(Config::parse_worker_config("1-4-6").is_err());
+        assert!(Config::parse_worker_config("a-b").is_err());
+        assert!(Config::parse_worker_config("1-").is_err());
+        assert!(Config::parse_worker_config("-4").is_err());
+        assert!(Config::parse_worker_config("").is_err());
+        assert!(Config::parse_worker_config("abc").is_err());
+
+        // Test min > max
+        assert!(Config::parse_worker_config("5-2").is_err());
+    }
+
+    #[test]
+    fn test_queue_and_topic_operations() {
+        let yaml_content = r#"
+service:
+  name: "test-service"
+  version: "1.0.0"
+  description: "Test service"
+
+activemq:
+  host: "localhost"
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+
+destinations:
+  queues:
+    queue1: "/queue/q1"
+    queue2: "/queue/q2"
+  topics:
+    topic1: "/topic/t1"
+    topic2: "/topic/t2"
+
+scaling:
+  enabled: true
+  interval_secs: 10
+  workers: {}
+        "#;
+
+        let config: Config = serde_yaml::from_str(yaml_content).unwrap();
+
+        // Test queue operations
+        assert_eq!(config.get_queue_config("queue1"), Some(&"/queue/q1".to_string()));
+        assert_eq!(config.get_queue_config("nonexistent"), None);
+        
+        let queue_names = config.get_all_queue_names();
+        assert_eq!(queue_names.len(), 2);
+        assert!(queue_names.contains(&"queue1".to_string()));
+        assert!(queue_names.contains(&"queue2".to_string()));
+
+        // Test topic operations
+        assert_eq!(config.get_topic_config("topic1"), Some(&"/topic/t1".to_string()));
+        assert_eq!(config.get_topic_config("nonexistent"), None);
+        
+        let topic_names = config.get_all_topic_names();
+        assert_eq!(topic_names.len(), 2);
+        assert!(topic_names.contains(&"topic1".to_string()));
+        assert!(topic_names.contains(&"topic2".to_string()));
+
+        // Test monitoring interval
+        assert_eq!(config.get_monitoring_interval_secs(), Some(10));
+    }
+
+    #[test]
+    fn test_heartbeat_conversion() {
+        let config = Config {
+            service: ServiceConfig {
+                name: "test".to_string(),
+                version: "1.0".to_string(),
+                description: "test".to_string(),
+            },
+            activemq: ActiveMQConfig {
+                host: "localhost".to_string(),
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                heartbeat_secs: 45, // Test non-standard value
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
+
+        let (send_ms, recv_ms) = config.get_heartbeat_ms();
+        assert_eq!(send_ms, 45000);
+        assert_eq!(recv_ms, 45000);
     }
 
     #[test]
@@ -645,5 +872,210 @@ shutdown:
         // When monitoring is disabled, get_auto_scaling_queues should return empty
         let auto_scaling_queues = config.get_auto_scaling_queues();
         assert_eq!(auto_scaling_queues, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_default_implementations() {
+        // Test all default implementations
+        let consumers_default = ConsumersConfig::default();
+        assert_eq!(consumers_default.ack_mode, "client_individual");
+
+        let logging_default = LoggingConfig::default();
+        assert_eq!(logging_default.level, "info");
+        assert_eq!(logging_default.output, "stdout");
+
+        let shutdown_default = ShutdownConfig::default();
+        assert_eq!(shutdown_default.timeout_secs, 30);
+        assert_eq!(shutdown_default.grace_period_secs, 5);
+
+        let scaling_default = ScalingConfig::default();
+        assert!(scaling_default.enabled);
+        assert_eq!(scaling_default.interval_secs, 5);
+        assert!(scaling_default.workers.is_empty());
+
+        let retry_default = RetryConfig::default();
+        assert_eq!(retry_default.max_attempts, -1);
+        assert_eq!(retry_default.initial_delay_ms, 1000);
+        assert_eq!(retry_default.max_delay_ms, 30000);
+        assert_eq!(retry_default.backoff_multiplier, 2.0);
+    }
+
+    #[test]
+    fn test_default_functions() {
+        assert_eq!(default_broker_name(), "localhost");
+        assert_eq!(default_scaling_enabled(), true);
+    }
+
+    #[test]
+    fn test_worker_range_equality() {
+        let range1 = WorkerRange {
+            min: 1,
+            max: 4,
+            is_fixed: false,
+        };
+        let range2 = WorkerRange {
+            min: 1,
+            max: 4,
+            is_fixed: false,
+        };
+        let range3 = WorkerRange {
+            min: 1,
+            max: 4,
+            is_fixed: true,
+        };
+
+        assert_eq!(range1, range2);
+        assert_ne!(range1, range3);
+    }
+
+    #[test]
+    fn test_config_queue_operations_edge_cases() {
+        let yaml_content = r#"
+service:
+  name: "test-service"
+  version: "1.0.0"
+  description: "Test service"
+
+activemq:
+  host: "localhost"
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+
+destinations:
+  queues: {}
+  topics: {}
+
+scaling:
+  enabled: true
+  interval_secs: 5
+  workers: {}
+        "#;
+
+        let config: Config = serde_yaml::from_str(yaml_content).unwrap();
+
+        // Test empty configurations
+        assert_eq!(config.get_all_queue_names().len(), 0);
+        assert_eq!(config.get_all_topic_names().len(), 0);
+        assert_eq!(config.get_auto_scaling_queues().len(), 0);
+        assert_eq!(config.get_fixed_worker_queues().len(), 0);
+        assert_eq!(config.get_all_configured_queues().len(), 0);
+
+        // Test nonexistent queue worker range
+        assert!(config.get_queue_worker_range("nonexistent").is_none());
+
+        // Test empty activemq queue name mapping
+        let mapping = config.get_queue_key_to_activemq_name_mapping();
+        assert!(mapping.is_empty());
+    }
+
+    #[test]
+    fn test_complex_queue_path_extraction() {
+        let yaml_content = r#"
+service:
+  name: "test-service"
+  version: "1.0.0"
+  description: "Test service"
+
+activemq:
+  host: "localhost"
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+
+destinations:
+  queues:
+    simple: "/queue/simple"
+    complex: "/queue/complex.queue.name"
+    unusual: "unusual_format"
+    empty_name: "/queue/"
+    deep_path: "/queue/app/module/queue"
+  topics: {}
+
+scaling:
+  enabled: false
+  interval_secs: 5
+  workers: {}
+        "#;
+
+        let config: Config = serde_yaml::from_str(yaml_content).unwrap();
+
+        // Test various queue name extraction patterns
+        assert_eq!(config.get_activemq_queue_name("simple"), Some("simple".to_string()));
+        assert_eq!(config.get_activemq_queue_name("complex"), Some("complex.queue.name".to_string()));
+        assert_eq!(config.get_activemq_queue_name("unusual"), Some("unusual_format".to_string()));
+        assert_eq!(config.get_activemq_queue_name("empty_name"), Some("".to_string()));
+        assert_eq!(config.get_activemq_queue_name("deep_path"), Some("app/module/queue".to_string()));
+        assert_eq!(config.get_activemq_queue_name("nonexistent"), None);
+
+        // Test mapping with various formats
+        let mapping = config.get_queue_key_to_activemq_name_mapping();
+        assert_eq!(mapping.len(), 5);
+        assert_eq!(mapping.get("simple"), Some(&"simple".to_string()));
+        assert_eq!(mapping.get("complex"), Some(&"complex.queue.name".to_string()));
+        assert_eq!(mapping.get("unusual"), Some(&"unusual_format".to_string()));
+    }
+
+    #[test]
+    fn test_worker_scaling_mixed_configurations() {
+        let yaml_content = r#"
+service:
+  name: "test-service"
+  version: "1.0.0"
+  description: "Test service"
+
+activemq:
+  host: "localhost"
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+
+destinations:
+  queues:
+    test_queue: "/queue/test"
+  topics: {}
+
+scaling:
+  enabled: true
+  interval_secs: 5
+  workers:
+    range_queue: "2-8"
+    fixed_queue_1: "1"
+    fixed_queue_5: "5"
+    another_range: "0-2"
+        "#;
+
+        let config: Config = serde_yaml::from_str(yaml_content).unwrap();
+
+        // Test mixed worker configurations
+        let auto_scaling = config.get_auto_scaling_queues();
+        assert_eq!(auto_scaling.len(), 2);
+        assert!(auto_scaling.contains(&"range_queue".to_string()));
+        assert!(auto_scaling.contains(&"another_range".to_string()));
+
+        let fixed_workers = config.get_fixed_worker_queues();
+        assert_eq!(fixed_workers.len(), 2);
+        assert!(fixed_workers.contains(&"fixed_queue_1".to_string()));
+        assert!(fixed_workers.contains(&"fixed_queue_5".to_string()));
+
+        let all_configured = config.get_all_configured_queues();
+        assert_eq!(all_configured.len(), 4);
+
+        // Test specific ranges
+        let range_config = config.get_queue_worker_range("range_queue").unwrap();
+        assert_eq!(range_config.min, 2);
+        assert_eq!(range_config.max, 8);
+        assert!(!range_config.is_fixed);
+
+        let fixed_config = config.get_queue_worker_range("fixed_queue_5").unwrap();
+        assert_eq!(fixed_config.min, 5);
+        assert_eq!(fixed_config.max, 5);
+        assert!(fixed_config.is_fixed);
     }
 }

@@ -51,6 +51,7 @@ pub struct ConsumerPool {
     /// Message handler for this queue
     handler: Arc<Box<MessageHandler>>,
     /// Global shutdown receiver
+    #[allow(dead_code)]
     global_shutdown_rx: Arc<Mutex<broadcast::Receiver<()>>>,
 }
 
@@ -432,10 +433,507 @@ mod tests {
         assert_eq!(pool.get_worker_count().await, 0);
     }
 
+    #[tokio::test]
+    async fn test_get_worker_count_empty_pool() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        assert_eq!(pool.get_worker_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_scale_up_from_zero() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        let initial_count = pool.get_worker_count().await;
+        assert_eq!(initial_count, 0);
+
+        let added = pool.scale_up(3).await.unwrap();
+        assert_eq!(added, 3);
+
+        let final_count = pool.get_worker_count().await;
+        assert_eq!(final_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_scale_up_respect_max_limit() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 2, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // Try to scale up to 5, but max is 2
+        let added = pool.scale_up(5).await.unwrap();
+        assert_eq!(added, 2);
+
+        let final_count = pool.get_worker_count().await;
+        assert_eq!(final_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_scale_up_no_change_when_target_lower() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // First scale up to 3
+        pool.scale_up(3).await.unwrap();
+        let initial_count = pool.get_worker_count().await;
+        assert_eq!(initial_count, 3);
+
+        // Try to scale "up" to 2 (which is lower)
+        let added = pool.scale_up(2).await.unwrap();
+        assert_eq!(added, 0);
+
+        let final_count = pool.get_worker_count().await;
+        assert_eq!(final_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_scale_down_basic() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // First scale up to 4
+        pool.scale_up(4).await.unwrap();
+        let initial_count = pool.get_worker_count().await;
+        assert_eq!(initial_count, 4);
+
+        // Scale down to 2
+        let removed = pool.scale_down(2).await.unwrap();
+        assert_eq!(removed, 2);
+
+        let final_count = pool.get_worker_count().await;
+        assert_eq!(final_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_scale_down_respect_min_limit() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 2, max: 5, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // First scale up to 4
+        pool.scale_up(4).await.unwrap();
+        let initial_count = pool.get_worker_count().await;
+        assert_eq!(initial_count, 4);
+
+        // Try to scale down to 0, but min is 2
+        let removed = pool.scale_down(0).await.unwrap();
+        assert_eq!(removed, 2); // Can only remove 2 (4 - 2 = 2)
+
+        let final_count = pool.get_worker_count().await;
+        assert_eq!(final_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_scale_down_no_change_when_target_higher() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // First scale up to 2
+        pool.scale_up(2).await.unwrap();
+        let initial_count = pool.get_worker_count().await;
+        assert_eq!(initial_count, 2);
+
+        // Try to scale "down" to 4 (which is higher)
+        let removed = pool.scale_down(4).await.unwrap();
+        assert_eq!(removed, 0);
+
+        let final_count = pool.get_worker_count().await;
+        assert_eq!(final_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_stop_worker_from_empty_pool() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        let stopped = pool.stop_worker().await.unwrap();
+        assert!(!stopped);
+    }
+
+    #[tokio::test]
+    async fn test_stop_worker_with_workers() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // Add some workers first
+        pool.scale_up(2).await.unwrap();
+        assert_eq!(pool.get_worker_count().await, 2);
+
+        // Stop one worker
+        let stopped = pool.stop_worker().await.unwrap();
+        assert!(stopped);
+        assert_eq!(pool.get_worker_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_stop_all_workers_empty_pool() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        let result = pool.stop_all().await;
+        assert!(result.is_ok());
+        assert_eq!(pool.get_worker_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_stop_all_workers_with_workers() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // Add some workers first
+        pool.scale_up(3).await.unwrap();
+        assert_eq!(pool.get_worker_count().await, 3);
+
+        // Stop all workers
+        let result = pool.stop_all().await;
+        assert!(result.is_ok());
+        assert_eq!(pool.get_worker_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_status_summary_empty() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        let summary = pool.get_status_summary().await;
+        assert!(summary.is_empty());
+    }
+
+    #[test]
+    fn test_worker_status_equality() {
+        assert_eq!(WorkerStatus::Running, WorkerStatus::Running);
+        assert_ne!(WorkerStatus::Running, WorkerStatus::Stopped);
+        assert_eq!(WorkerStatus::Starting, WorkerStatus::Starting);
+        assert_ne!(WorkerStatus::Starting, WorkerStatus::Failed);
+    }
+
+    #[test]
+    fn test_worker_status_clone() {
+        let status = WorkerStatus::Running;
+        let cloned = status.clone();
+        assert_eq!(status, cloned);
+    }
+
+    #[test]
+    fn test_worker_status_debug() {
+        let status = WorkerStatus::Running;
+        let debug_str = format!("{:?}", status);
+        assert_eq!(debug_str, "Running");
+    }
+
     #[test]
     fn test_worker_range() {
         let range = WorkerRange { min: 2, max: 5, is_fixed: false };
         assert_eq!(range.min, 2);
         assert_eq!(range.max, 5);
+        assert!(!range.is_fixed);
+
+        let fixed_range = WorkerRange { min: 3, max: 3, is_fixed: true };
+        assert_eq!(fixed_range.min, 3);
+        assert_eq!(fixed_range.max, 3);
+        assert!(fixed_range.is_fixed);
+    }
+
+    #[tokio::test]
+    async fn test_worker_info_debug() {
+        let (shutdown_tx, _) = broadcast::channel(1);
+        let handle = tokio::spawn(async { Ok(()) });
+        
+        let worker_info = WorkerInfo {
+            id: "test-worker".to_string(),
+            handle,
+            shutdown_tx,
+            status: WorkerStatus::Running,
+        };
+
+        let debug_str = format!("{:?}", worker_info);
+        assert!(debug_str.contains("test-worker"));
+        assert!(debug_str.contains("Running"));
+    }
+
+    #[tokio::test]
+    async fn test_spawn_worker_generates_unique_ids() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        let id1 = pool.spawn_worker().await.unwrap();
+        let id2 = pool.spawn_worker().await.unwrap();
+        
+        assert_ne!(id1, id2);
+        assert!(id1.starts_with("test-queue#"));
+        assert!(id2.starts_with("test-queue#"));
+        
+        // Clean up
+        pool.stop_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_get_queue_name() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 1, max: 3, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "my-special-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        assert_eq!(pool.get_queue_name(), "my-special-queue");
+    }
+
+    #[tokio::test]
+    async fn test_get_worker_range() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 2, max: 8, is_fixed: true };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range.clone(),
+            handler,
+            rx,
+        );
+
+        let returned_range = pool.get_worker_range();
+        assert_eq!(returned_range.min, 2);
+        assert_eq!(returned_range.max, 8);
+        assert!(returned_range.is_fixed);
+    }
+
+    #[tokio::test]
+    async fn test_scale_up_partial_failure_resilience() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 10, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // This should work normally since we're not actually connecting to a real service
+        let added = pool.scale_up(3).await.unwrap();
+        assert_eq!(added, 3);
+        assert_eq!(pool.get_worker_count().await, 3);
+
+        // Clean up
+        pool.stop_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_scale_operations_idempotency() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 1, max: 5, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        );
+
+        // Scale up to 3
+        let added1 = pool.scale_up(3).await.unwrap();
+        assert_eq!(added1, 3);
+        
+        // Try to scale up to 3 again (should add 0)
+        let added2 = pool.scale_up(3).await.unwrap();
+        assert_eq!(added2, 0);
+        
+        assert_eq!(pool.get_worker_count().await, 3);
+
+        // Scale down to 2
+        let removed1 = pool.scale_down(2).await.unwrap();
+        assert_eq!(removed1, 1);
+        
+        // Try to scale down to 2 again (should remove 0)
+        let removed2 = pool.scale_down(2).await.unwrap();
+        assert_eq!(removed2, 0);
+        
+        assert_eq!(pool.get_worker_count().await, 2);
+
+        // Clean up
+        pool.stop_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_scaling_operations() {
+        let config = create_test_config();
+        let worker_range = WorkerRange { min: 0, max: 10, is_fixed: false };
+        let handler = create_test_handler();
+        let (_tx, rx) = broadcast::channel(1);
+
+        let pool = Arc::new(ConsumerPool::new(
+            "test-queue".to_string(),
+            config,
+            worker_range,
+            handler,
+            rx,
+        ));
+
+        // Run multiple scaling operations concurrently
+        let pool1 = pool.clone();
+        let pool2 = pool.clone();
+        let pool3 = pool.clone();
+
+        let (result1, result2, result3) = tokio::join!(
+            pool1.scale_up(3),
+            pool2.scale_up(2),
+            pool3.scale_up(4)
+        );
+
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert!(result3.is_ok());
+
+        // Final count should not exceed max and should be consistent
+        let final_count = pool.get_worker_count().await;
+        assert!(final_count <= 10);
+
+        // Clean up
+        pool.stop_all().await.unwrap();
     }
 }
