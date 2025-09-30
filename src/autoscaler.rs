@@ -467,7 +467,6 @@ mod tests {
         _initial_workers: usize,
     ) -> ConsumerPool {
         let config = create_test_config();
-        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
         
         // Create a mock handler that does nothing
         let handler = Box::new(|_msg: String| {
@@ -482,7 +481,6 @@ mod tests {
             config,
             worker_range,
             handler,
-            shutdown_rx,
         )
     }
 

@@ -155,7 +155,7 @@ impl StompRunner {
         let (shutdown_tx, _shutdown_rx) = broadcast::channel::<()>(1);
 
         // Setup auto-scaling consumer pools
-        let consumer_pools = self.setup_custom_consumer_pools(&config, &shutdown_tx).await?;
+        let consumer_pools = self.setup_custom_consumer_pools(&config).await?;
 
         // Create task collection for managing fixed worker subscribers
         let mut subscriber_tasks = JoinSet::new();
@@ -229,7 +229,6 @@ impl StompRunner {
     async fn setup_custom_consumer_pools(
         &self,
         config: &Config,
-        shutdown_tx: &broadcast::Sender<()>,
     ) -> Result<HashMap<String, ConsumerPool>> {
         let mut consumer_pools = HashMap::new();
         
@@ -283,7 +282,6 @@ impl StompRunner {
                     config.clone(),
                     worker_range.clone(),
                     handler,
-                    shutdown_tx.subscribe(),
                 );
 
                 // Initialize pool with minimum workers
@@ -673,44 +671,6 @@ impl StompRunner {
         }
 
         info!("✅ Fixed workers shutdown complete");
-        Ok(())
-    }
-
-    /// Handle shutdown for auto-scaling system
-    async fn shutdown_autoscaling_system(
-        &self,
-        shutdown_handle: tokio::task::JoinHandle<()>,
-        autoscaler_handle: tokio::task::JoinHandle<AutoScaler>,
-        mut topic_tasks: JoinSet<Result<()>>,
-    ) -> Result<()> {
-        // Wait for shutdown signal
-        let _ = shutdown_handle.await;
-
-        info!("🛑 Shutdown signal received, stopping auto-scaling system...");
-
-        // Stop the auto-scaler and get it back
-        let autoscaler = match autoscaler_handle.await {
-            Ok(autoscaler) => autoscaler,
-            Err(e) => {
-                error!("Failed to join auto-scaler task: {}", e);
-                return Ok(());
-            }
-        };
-
-        // Stop all consumer pools
-        autoscaler.stop_all_pools().await?;
-
-        // Stop topic tasks
-        topic_tasks.abort_all();
-        while let Some(result) = topic_tasks.join_next().await {
-            if let Err(e) = result {
-                if !e.is_cancelled() {
-                    warn!("Topic task error during shutdown: {}", e);
-                }
-            }
-        }
-
-        info!("✅ Auto-scaling application shutdown complete");
         Ok(())
     }
 

@@ -50,9 +50,6 @@ pub struct ConsumerPool {
     workers: Arc<Mutex<Vec<WorkerInfo>>>,
     /// Message handler for this queue
     handler: Arc<Box<MessageHandler>>,
-    /// Global shutdown receiver
-    #[allow(dead_code)]
-    global_shutdown_rx: Arc<Mutex<broadcast::Receiver<()>>>,
 }
 
 impl ConsumerPool {
@@ -62,7 +59,6 @@ impl ConsumerPool {
         config: Config,
         worker_range: WorkerRange,
         handler: Box<MessageHandler>,
-        global_shutdown_rx: broadcast::Receiver<()>,
     ) -> Self {
         info!(
             "🏊 Creating consumer pool for queue '{}' (workers: {}-{})",
@@ -75,7 +71,6 @@ impl ConsumerPool {
             worker_range,
             workers: Arc::new(Mutex::new(Vec::new())),
             handler: Arc::new(handler),
-            global_shutdown_rx: Arc::new(Mutex::new(global_shutdown_rx)),
         }
     }
 
@@ -418,14 +413,12 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 1, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         assert_eq!(pool.get_queue_name(), "test-queue");
@@ -439,14 +432,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         assert_eq!(pool.get_worker_count().await, 0);
@@ -457,14 +449,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         let initial_count = pool.get_worker_count().await;
@@ -482,14 +473,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 2, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // Try to scale up to 5, but max is 2
@@ -505,14 +495,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // First scale up to 3
@@ -533,14 +522,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // First scale up to 4
@@ -561,14 +549,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 2, max: 5, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // First scale up to 4
@@ -589,14 +576,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // First scale up to 2
@@ -617,14 +603,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         let stopped = pool.stop_worker().await.unwrap();
@@ -636,14 +621,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // Add some workers first
@@ -661,14 +645,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         let result = pool.stop_all().await;
@@ -681,14 +664,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // Add some workers first
@@ -706,14 +688,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         let summary = pool.get_status_summary().await;
@@ -777,14 +758,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 5, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         let id1 = pool.spawn_worker().await.unwrap();
@@ -803,14 +783,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 1, max: 3, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "my-special-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         assert_eq!(pool.get_queue_name(), "my-special-queue");
@@ -821,14 +800,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 2, max: 8, is_fixed: true };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range.clone(),
             handler,
-            rx,
         );
 
         let returned_range = pool.get_worker_range();
@@ -842,14 +820,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 10, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // This should work normally since we're not actually connecting to a real service
@@ -866,14 +843,13 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 1, max: 5, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
         );
 
         // Scale up to 3
@@ -905,14 +881,14 @@ mod tests {
         let config = create_test_config();
         let worker_range = WorkerRange { min: 0, max: 10, is_fixed: false };
         let handler = create_test_handler();
-        let (_tx, rx) = broadcast::channel(1);
+        
 
         let pool = Arc::new(ConsumerPool::new(
             "test-queue".to_string(),
             config,
             worker_range,
             handler,
-            rx,
+            
         ));
 
         // Run multiple scaling operations concurrently
