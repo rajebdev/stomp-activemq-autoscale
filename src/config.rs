@@ -8,7 +8,7 @@ use std::time::Duration;
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub service: ServiceConfig,
-    pub activemq: ActiveMQConfig,
+    pub broker: BrokerConfig,
     pub destinations: DestinationsConfig,
     #[serde(default = "ScalingConfig::default")]
     pub scaling: ScalingConfig,
@@ -30,9 +30,19 @@ pub struct ServiceConfig {
     pub description: String,
 }
 
-/// Unified ActiveMQ configuration for both STOMP and monitoring
+/// Supported broker types
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum BrokerType {
+    ActiveMQ,
+    Artemis,
+}
+
+/// Unified broker configuration for both STOMP and monitoring
 #[derive(Debug, Deserialize, Clone)]
-pub struct ActiveMQConfig {
+pub struct BrokerConfig {
+    #[serde(rename = "type")]
+    pub broker_type: BrokerType,
     pub host: String,
     pub username: String,
     pub password: String,
@@ -189,7 +199,7 @@ impl Config {
 
     /// Get credentials
     pub fn get_credentials(&self) -> Option<(String, String)> {
-        Some((self.activemq.username.clone(), self.activemq.password.clone()))
+        Some((self.broker.username.clone(), self.broker.password.clone()))
     }
 
     /// Get a specific queue path
@@ -204,7 +214,7 @@ impl Config {
 
     /// Get heartbeat settings in milliseconds (converting from seconds)
     pub fn get_heartbeat_ms(&self) -> (u32, u32) {
-        let ms = self.activemq.heartbeat_secs * 1000;
+        let ms = self.broker.heartbeat_secs * 1000;
         (ms, ms)
     }
 
@@ -355,6 +365,56 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    fn get_test_yaml() -> &'static str {
+        r#"
+service:
+  name: "test-service"
+  version: "1.0.0"
+  description: "Test service"
+
+broker:
+  type: "activemq"
+  host: "localhost"
+  username: "admin"
+  password: "admin"
+  stomp_port: 61613
+  web_port: 8161
+  heartbeat_secs: 30
+  broker_name: "localhost"
+
+destinations:
+  queues:
+    default: "/queue/demo"
+    api_requests: "/queue/api.requests"
+  topics:
+    notifications: "/topic/notifications"
+
+scaling:
+  enabled: true
+  interval_secs: 5
+  workers:
+    default: "1-4"
+    api_requests: "2-6"
+
+consumers:
+  ack_mode: "auto"
+
+logging:
+  level: "info"
+  output: "stdout"
+
+shutdown:
+  timeout_secs: 30
+  grace_period_secs: 5
+
+retry:
+  max_attempts: 3
+  initial_delay_ms: 1000
+  max_delay_ms: 30000
+  backoff_multiplier: 2.0
+"#
+    }
+
     fn create_test_config_yaml() -> &'static str {
         r#"
 service:
@@ -362,7 +422,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -408,8 +469,8 @@ retry:
 
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();
         assert_eq!(config.service.name, "test-service");
-        assert_eq!(config.activemq.host, "localhost");
-        assert_eq!(config.activemq.stomp_port, 61613);
+        assert_eq!(config.broker.host, "localhost");
+        assert_eq!(config.broker.stomp_port, 61613);
 
         let (username, password) = config.get_credentials().unwrap();
         assert_eq!(username, "admin");
@@ -450,7 +511,7 @@ retry:
 
         let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
         assert_eq!(config.service.name, "test-service");
-        assert_eq!(config.activemq.host, "localhost");
+        assert_eq!(config.broker.host, "localhost");
     }
 
     #[test]
@@ -480,7 +541,8 @@ service:
   version: "1.0.0"
   description: "Minimal service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -496,7 +558,7 @@ destinations:
         let config: Config = serde_yaml::from_str(minimal_yaml).unwrap();
         
         // Check that defaults are applied correctly
-        assert_eq!(config.activemq.broker_name, "localhost");
+        assert_eq!(config.broker.broker_name, "localhost");
         assert!(config.scaling.enabled);
         assert_eq!(config.scaling.interval_secs, 5);
         assert_eq!(config.consumers.ack_mode, "client_individual");
@@ -602,7 +664,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -656,7 +719,8 @@ scaling:
                 version: "1.0".to_string(),
                 description: "test".to_string(),
             },
-            activemq: ActiveMQConfig {
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
                 host: "localhost".to_string(),
                 username: "admin".to_string(),
                 password: "admin".to_string(),
@@ -689,7 +753,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -752,7 +817,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -819,7 +885,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -936,7 +1003,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -979,7 +1047,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -1028,7 +1097,8 @@ service:
   version: "1.0.0"
   description: "Test service"
 
-activemq:
+broker:
+  type: "activemq"
   host: "localhost"
   stomp_port: 61613
   web_port: 8161
@@ -1079,3 +1149,6 @@ scaling:
         assert!(fixed_config.is_fixed);
     }
 }
+
+
+

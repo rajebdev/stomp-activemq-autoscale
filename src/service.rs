@@ -16,6 +16,7 @@ use stomp::session_builder::SessionBuilder;
 use stomp::subscription::{AckMode, AckOrNack};
 
 use crate::config::Config;
+use crate::utils::{normalize_destination_name};
 
 // Option setters for the session builder (following reference implementation)
 struct WithHeader(Header);
@@ -78,12 +79,12 @@ impl StompService {
         let (send_heartbeat, recv_heartbeat) = self.config.get_heartbeat_ms();
         debug!(
             "Connecting to STOMP broker at {}:{}",
-            self.config.activemq.host, self.config.activemq.stomp_port
+            self.config.broker.host, self.config.broker.stomp_port
         );
 
         // Build session using the reference pattern with option setters
         let mut session_builder =
-            SessionBuilder::new(&self.config.activemq.host, self.config.activemq.stomp_port)
+            SessionBuilder::new(&self.config.broker.host, self.config.broker.stomp_port)
                 .with(WithHeartBeat(HeartBeat(send_heartbeat, recv_heartbeat)));
 
         // Add credentials if available
@@ -105,7 +106,7 @@ impl StompService {
 
         self.session = Some(session);
         self.is_connected.store(true, Ordering::Relaxed);
-        info!("Connected to STOMP broker {}:{}", self.config.activemq.host, self.config.activemq.stomp_port);
+        info!("Connected to STOMP broker {}:{}", self.config.broker.host, self.config.broker.stomp_port);
         debug!("Connection established with client-id: {}", client_id);
 
         Ok(())
@@ -139,9 +140,26 @@ impl StompService {
 
         debug!("Sending message to topic: {}", destination);
 
+        // Normalize destination for Artemis to use logical address names
+        let destination_for_stomp = match self.config.broker.broker_type {
+            crate::config::BrokerType::ActiveMQ => destination.clone(),
+            crate::config::BrokerType::Artemis => {
+                // Strip STOMP prefix for Artemis to use logical address name
+                normalize_destination_name(&destination).to_string()
+            },
+        };
+        
+        debug!("Using STOMP destination: {}", destination_for_stomp);
+
         // Send message using comprehensive header support API with fluent chaining
-        let mut message_builder = session.message(&destination, payload)
+        let mut message_builder = session.message(&destination_for_stomp, payload)
             .with_content_type("text/plain"); // Set default content type
+
+        // Add Artemis-specific routing type header for topics (multicast)
+        if let crate::config::BrokerType::Artemis = self.config.broker.broker_type {
+            message_builder = message_builder.add_header("destination-type", "MULTICAST");
+            debug!("Added Artemis routing header: {}={} for topic", "destination-type", "MULTICAST");
+        }
 
         // Add custom headers
         if !headers.is_empty() {
@@ -149,8 +167,13 @@ impl StompService {
             if let Some(priority_str) = headers.get("priority") {
                 if let Ok(priority) = priority_str.parse::<u8>() {
                     let clamped_priority = priority.clamp(0, 9);
-                    message_builder = message_builder.add_header("JMSPriority", &clamped_priority.to_string());
-                    debug!("Setting topic message priority: {}", clamped_priority);
+                    // Use broker-appropriate priority header
+                    let priority_header = match self.config.broker.broker_type {
+                        crate::config::BrokerType::ActiveMQ => "JMSPriority",
+                        crate::config::BrokerType::Artemis => "JMSPriority", // Artemis also uses JMSPriority
+                    };
+                    message_builder = message_builder.add_header(priority_header, &clamped_priority.to_string());
+                    debug!("Setting topic message priority: {} (header: {})", clamped_priority, priority_header);
                 }
             }
 
@@ -211,9 +234,26 @@ impl StompService {
 
         debug!("Sending message to queue: {}", destination);
 
+        // Normalize destination for Artemis to use logical address names
+        let destination_for_stomp = match self.config.broker.broker_type {
+            crate::config::BrokerType::ActiveMQ => destination.clone(),
+            crate::config::BrokerType::Artemis => {
+                // Strip STOMP prefix for Artemis to use logical address name
+                normalize_destination_name(&destination).to_string()
+            },
+        };
+        
+        debug!("Using STOMP destination: {}", destination_for_stomp);
+
         // Send message using comprehensive header support API with advanced features
-        let mut message_builder = session.message(&destination, payload)
+        let mut message_builder = session.message(&destination_for_stomp, payload)
             .with_content_type("text/plain"); // Set default content type
+
+        // Add Artemis-specific routing type header for queues (anycast)
+        if let crate::config::BrokerType::Artemis = self.config.broker.broker_type {
+            message_builder = message_builder.add_header("destination-type", "ANYCAST");
+            debug!("Added Artemis routing header: {}={} for queue", "destination-type", "ANYCAST");
+        }
 
         // Add custom headers with enhanced functionality
         if !headers.is_empty() {
@@ -222,30 +262,39 @@ impl StompService {
                 if let Ok(priority) = priority_str.parse::<u8>() {
                     // Priority range: 0-9 (0 = lowest, 9 = highest)
                     let clamped_priority = priority.clamp(0, 9);
-                    // Use JMSPriority header for ActiveMQ compatibility
-                    message_builder = message_builder.add_header("JMSPriority", &clamped_priority.to_string());
-                    debug!("Setting message priority: {}", clamped_priority);
+                    // Use broker-appropriate priority header
+                    let priority_header = match self.config.broker.broker_type {
+                        crate::config::BrokerType::ActiveMQ => "JMSPriority",
+                        crate::config::BrokerType::Artemis => "JMSPriority", // Artemis also uses JMSPriority
+                    };
+                    message_builder = message_builder.add_header(priority_header, &clamped_priority.to_string());
+                    debug!("Setting message priority: {} (header: {})", clamped_priority, priority_header);
                 }
             }
 
             // Check for persistent/non-persistent delivery mode
             if let Some(persistent_str) = headers.get("persistent") {
+                let delivery_header = match self.config.broker.broker_type {
+                    crate::config::BrokerType::ActiveMQ => "JMSDeliveryMode",
+                    crate::config::BrokerType::Artemis => "JMSDeliveryMode", // Artemis also uses JMSDeliveryMode
+                };
+                
                 match persistent_str.to_lowercase().as_str() {
                     "true" | "1" | "yes" => {
                         // Persistent delivery (messages survive broker restart)
                         // Use JMSDeliveryMode: 2 = PERSISTENT, 1 = NON_PERSISTENT
-                        message_builder = message_builder.add_header("JMSDeliveryMode", "2");
-                        debug!("Setting persistent delivery mode");
+                        message_builder = message_builder.add_header(delivery_header, "2");
+                        debug!("Setting persistent delivery mode (header: {})", delivery_header);
                     }
                     "false" | "0" | "no" => {
                         // Non-persistent delivery (faster but messages lost on broker restart)
-                        message_builder = message_builder.add_header("JMSDeliveryMode", "1");
-                        debug!("Setting non-persistent delivery mode");
+                        message_builder = message_builder.add_header(delivery_header, "1");
+                        debug!("Setting non-persistent delivery mode (header: {})", delivery_header);
                     }
                     _ => {
                         // Invalid value, default to persistent for safety
-                        message_builder = message_builder.add_header("JMSDeliveryMode", "2");
-                        warn!("Invalid persistent value '{}', defaulting to persistent", persistent_str);
+                        message_builder = message_builder.add_header(delivery_header, "2");
+                        warn!("Invalid persistent value '{}', defaulting to persistent (header: {})", persistent_str, delivery_header);
                     }
                 }
             }
@@ -253,10 +302,14 @@ impl StompService {
             // Check for TTL (Time-To-Live)
             if let Some(ttl_str) = headers.get("ttl") {
                 if let Ok(ttl_ms) = ttl_str.parse::<u64>() {
-                    // Use JMSExpiration header for ActiveMQ compatibility
+                    // Use broker-appropriate expiration header
+                    let expiration_header = match self.config.broker.broker_type {
+                        crate::config::BrokerType::ActiveMQ => "JMSExpiration",
+                        crate::config::BrokerType::Artemis => "JMSExpiration", // Artemis also uses JMSExpiration
+                    };
                     let expiry_time = chrono::Utc::now().timestamp_millis() as u64 + ttl_ms;
-                    message_builder = message_builder.add_header("JMSExpiration", &expiry_time.to_string());
-                    debug!("Setting message TTL: {}ms (expires at: {})", ttl_ms, expiry_time);
+                    message_builder = message_builder.add_header(expiration_header, &expiry_time.to_string());
+                    debug!("Setting message TTL: {}ms (expires at: {}, header: {})", ttl_ms, expiry_time, expiration_header);
                 }
             }
 
@@ -276,7 +329,7 @@ impl StompService {
             }
         }
 
-        // Ready to send message with proper ActiveMQ-compatible headers
+        // Ready to send message with proper broker-compatible headers
 
         // Send message and handle result with match
         match message_builder.send().await {
@@ -352,9 +405,25 @@ impl StompService {
                     SessionEvent::Connected => {
                         debug!("Connected to STOMP broker for topic subscription");
 
-                        let subscription_id = session
-                            .subscription(&topic_path)
-                            .with(AckMode::ClientIndividual)
+                        // Normalize destination for Artemis to use logical address names
+                        let destination_for_stomp = match self.config.broker.broker_type {
+                            crate::config::BrokerType::ActiveMQ => topic_path.clone(),
+                            crate::config::BrokerType::Artemis => {
+                                // Strip STOMP prefix for Artemis to use logical address name
+                                normalize_destination_name(&topic_path).to_string()
+                            },
+                        };
+
+                        let mut session_builder = session
+                            .subscription(&destination_for_stomp)
+                            .with(AckMode::ClientIndividual);
+
+                        if self.config.broker.broker_type == crate::config::BrokerType::Artemis {
+                            session_builder = session_builder.add_header("subscription-type", "MULTICAST");
+                            debug!("Added Artemis subscription header: {}={}", "subscription-type", "MULTICAST");
+                        }
+
+                        let subscription_id = session_builder
                             .start()
                             .await?;
 
@@ -420,14 +489,14 @@ impl StompService {
                     }
 
                     SessionEvent::ErrorFrame(frame) => {
-                        error!("Error frame received: {:?}", frame);
+                        error!("[{}] Error frame received: {:?}", topic_path, frame);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
                     }
 
                     SessionEvent::Disconnected(reason) => {
-                        warn!("Session disconnected: {:?}", reason);
+                        warn!("[{}] Session disconnected: {:?}", topic_path, reason);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
@@ -514,9 +583,25 @@ impl StompService {
                     SessionEvent::Connected => {
                         debug!("Connected to STOMP broker for queue subscription");
 
-                        let subscription_id = session
-                            .subscription(&queue_path)
-                            .with(AckMode::ClientIndividual)
+                        // Normalize destination for Artemis to use logical address names
+                        let destination_for_stomp = match self.config.broker.broker_type {
+                            crate::config::BrokerType::ActiveMQ => queue_path.clone(),
+                            crate::config::BrokerType::Artemis => {
+                                // Strip STOMP prefix for Artemis to use logical address name
+                                normalize_destination_name(&queue_path).to_string()
+                            },
+                        };
+
+                        let mut session_builder = session
+                            .subscription(&destination_for_stomp)
+                            .with(AckMode::ClientIndividual);
+                        
+                        if self.config.broker.broker_type == crate::config::BrokerType::Artemis {
+                            session_builder = session_builder.add_header("subscription-type", "ANYCAST");
+                            debug!("Added Artemis subscription header: {}={}", "subscription-type", "ANYCAST");
+                        }
+
+                        let subscription_id = session_builder
                             .start()
                             .await?;
 
@@ -582,14 +667,14 @@ impl StompService {
                     }
 
                     SessionEvent::ErrorFrame(frame) => {
-                        error!("Error frame received: {:?}", frame);
+                        error!("[{}] Error frame received: {:?}", queue_path, frame);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
                     }
 
                     SessionEvent::Disconnected(reason) => {
-                        warn!("Session disconnected: {:?}", reason);
+                        warn!("[{}] Session disconnected: {:?}", queue_path, reason);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
@@ -905,7 +990,8 @@ mod tests {
                 version: "1.0.0".to_string(),
                 description: "Test service".to_string(),
             },
-            activemq: ActiveMQConfig {
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
                 host: "localhost".to_string(),
                 stomp_port: 61613,
                 web_port: 8161,
@@ -937,5 +1023,63 @@ mod tests {
                 backoff_multiplier: 2.0,
             },
         }
+    }
+
+    fn create_artemis_test_config() -> Config {
+        use crate::config::*;
+        use std::collections::HashMap;
+
+        Config {
+            service: ServiceConfig {
+                name: "test-artemis-service".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Test Artemis service".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::Artemis,
+                host: "localhost".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                heartbeat_secs: 30,
+                broker_name: "broker".to_string(), // Default Artemis broker name
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig {
+                ack_mode: "client_individual".to_string(),
+            },
+            logging: LoggingConfig {
+                level: "info".to_string(),
+                output: "stdout".to_string(),
+            },
+            shutdown: ShutdownConfig {
+                timeout_secs: 30,
+                grace_period_secs: 5,
+            },
+            retry: RetryConfig {
+                max_attempts: 3,
+                initial_delay_ms: 100,
+                max_delay_ms: 1000,
+                backoff_multiplier: 2.0,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_artemis_stomp_service_creation() {
+        let config = create_artemis_test_config();
+        let service = StompService::new(config).await;
+        assert!(service.is_ok());
+
+        let service = service.unwrap();
+        assert!(!service.is_connected());
+        assert!(!service.is_healthy());
+        assert_eq!(service.config.broker.broker_type, crate::config::BrokerType::Artemis);
+        assert_eq!(service.config.broker.broker_name, "broker");
     }
 }

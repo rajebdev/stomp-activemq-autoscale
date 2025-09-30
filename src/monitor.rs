@@ -1,13 +1,16 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-use crate::config::ActiveMQConfig;
+use crate::broker_monitor::BrokerMonitor;
+use crate::config::{BrokerConfig, BrokerType};
+use crate::utils::{normalize_destination_name, determine_routing_types};
 
 #[derive(Error, Debug)]
 pub enum MonitoringError {
@@ -15,15 +18,15 @@ pub enum MonitoringError {
     HttpError(#[from] reqwest::Error),
     #[error("JSON parsing failed: {0}")]
     JsonError(#[from] serde_json::Error),
-    #[error("ActiveMQ API error: {0}")]
-    ActiveMQError(String),
+    #[error("Broker API error: {0}")]
+    BrokerAPIError(String),
     #[error("Configuration error: {0}")]
     ConfigError(String),
     #[error("Network timeout")]
     Timeout,
 }
 
-/// Queue metrics returned from ActiveMQ
+/// Queue metrics returned from message broker
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueMetrics {
     /// Queue name
@@ -52,14 +55,22 @@ struct JolokiaResponse {
 /// ActiveMQ monitoring client
 pub struct ActiveMQMonitor {
     client: Client,
-    config: ActiveMQConfig,
+    config: BrokerConfig,
     retry_count: u32,
     max_retries: u32,
 }
 
 impl ActiveMQMonitor {
     /// Create a new ActiveMQ monitoring client
-    pub fn new(config: ActiveMQConfig) -> Result<Self> {
+    pub fn new(config: BrokerConfig) -> Result<Self> {
+        // Ensure this is for ActiveMQ
+        if config.broker_type != BrokerType::ActiveMQ {
+            return Err(anyhow::anyhow!(
+                "ActiveMQMonitor requires broker type to be ActiveMQ, got: {:?}",
+                config.broker_type
+            ));
+        }
+
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .user_agent("stomp-autoscaler/1.0")
@@ -72,39 +83,6 @@ impl ActiveMQMonitor {
             retry_count: 0,
             max_retries: 3,
         })
-    }
-
-    /// Get queue metrics for a specific queue
-    pub async fn get_queue_metrics(&mut self, queue_name: &str) -> Result<QueueMetrics> {
-        let mut attempts = 0;
-        let max_attempts = self.max_retries + 1;
-
-        while attempts < max_attempts {
-            match self.fetch_queue_metrics(queue_name).await {
-                Ok(metrics) => {
-                    // Reset retry count on success
-                    self.retry_count = 0;
-                    return Ok(metrics);
-                }
-                Err(e) => {
-                    attempts += 1;
-                    self.retry_count += 1;
-                    
-                    if attempts >= max_attempts {
-                        error!("Failed to fetch queue metrics for '{}' after {} attempts: {}", 
-                               queue_name, max_attempts, e);
-                        return Err(e.into());
-                    }
-
-                    let delay = self.calculate_retry_delay(attempts);
-                    warn!("Attempt {}/{} failed for queue '{}': {}. Retrying in {}ms", 
-                          attempts, max_attempts, queue_name, e, delay.as_millis());
-                    sleep(delay).await;
-                }
-            }
-        }
-
-        Err(anyhow::anyhow!("Exhausted all retry attempts"))
     }
 
     /// Fetch queue metrics from ActiveMQ management API
@@ -137,7 +115,7 @@ impl ActiveMQMonitor {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(MonitoringError::ActiveMQError(format!(
+            return Err(MonitoringError::BrokerAPIError(format!(
                 "HTTP {} - {}",
                 status, error_text
             )));
@@ -154,7 +132,7 @@ impl ActiveMQMonitor {
             let error_msg = jolokia_response
                 .error
                 .unwrap_or_else(|| format!("Jolokia status: {}", jolokia_response.status));
-            return Err(MonitoringError::ActiveMQError(error_msg));
+            return Err(MonitoringError::BrokerAPIError(error_msg));
         }
 
         // Extract metrics from the response
@@ -215,13 +193,242 @@ impl ActiveMQMonitor {
 
         Duration::from_millis(capped_delay_ms)
     }
+}
 
-    /// Get multiple queue metrics in parallel
-    pub async fn get_multiple_queue_metrics(&mut self, queue_names: &[String]) -> Vec<(String, Result<QueueMetrics>)> {
+/// Artemis monitoring client
+pub struct ArtemisMonitor {
+    client: Client,
+    config: BrokerConfig,
+    retry_count: u32,
+    max_retries: u32,
+}
+
+impl ArtemisMonitor {
+    /// Create a new Artemis monitoring client
+    pub fn new(config: BrokerConfig) -> Result<Self> {
+        // Ensure this is for Artemis
+        if config.broker_type != BrokerType::Artemis {
+            return Err(anyhow::anyhow!(
+                "ArtemisMonitor requires broker type to be Artemis, got: {:?}",
+                config.broker_type
+            ));
+        }
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("stomp-autoscaler/1.0")
+            .build()
+            .context("Failed to create HTTP client")?;
+
+        Ok(Self {
+            client,
+            config,
+            retry_count: 0,
+            max_retries: 3,
+        })
+    }
+
+    /// Fetch queue metrics from Artemis management API
+    async fn fetch_queue_metrics(&self, queue_name: &str) -> Result<QueueMetrics, MonitoringError> {
+        // First try to create the queue if it doesn't exist
+        self.ensure_queue_exists(queue_name).await.ok();
+        
+        // Try different routing types based on destination type
+        let routing_types = determine_routing_types(queue_name);
+        
+        for routing_type in &routing_types {
+            match self.fetch_queue_metrics_with_routing_type(queue_name, routing_type).await {
+                Ok(metrics) => return Ok(metrics),
+                Err(e) => {
+                    debug!("Failed to fetch metrics for queue '{}' with routing-type '{}': {}", queue_name, routing_type, e);
+                    continue;
+                }
+            }
+        }
+        
+        Err(MonitoringError::BrokerAPIError(format!(
+            "Queue '{}' not found with any routing type", queue_name
+        )))
+    }
+    
+    /// Ensure queue exists by trying to create it
+    async fn ensure_queue_exists(&self, queue_name: &str) -> Result<(), MonitoringError> {
+        let base_url = format!("http://{}:{}", self.config.host, self.config.web_port);
+        let jolokia_url = format!("{}/console/jolokia/", base_url.trim_end_matches('/'));
+        
+        // Normalize destination name by removing STOMP prefixes
+        let normalized_name = normalize_destination_name(queue_name);
+        
+        let request_payload = json!({
+            "type": "exec",
+            "mbean": format!("org.apache.activemq.artemis:broker=\"{}\"", self.config.broker_name),
+            "operation": "createQueue(java.lang.String,java.lang.String)",
+            "arguments": [normalized_name, normalized_name]
+        });
+        
+        debug!("Ensuring queue '{}' exists", queue_name);
+        
+        let response = self.client.post(&jolokia_url)
+            .basic_auth(&self.config.username, Some(&self.config.password))
+            .header("Origin", format!("http://{}:{}", self.config.host, self.config.web_port))
+            .header("Content-Type", "application/json")
+            .json(&request_payload)
+            .send()
+            .await
+            .map_err(MonitoringError::HttpError)?;
+            
+        if response.status().is_success() {
+            debug!("Successfully ensured queue '{}' exists", queue_name);
+        }
+        
+        Ok(())
+    }
+    
+    /// Fetch queue metrics with specific routing type
+    async fn fetch_queue_metrics_with_routing_type(&self, queue_name: &str, routing_type: &str) -> Result<QueueMetrics, MonitoringError> {
+        let base_url = format!("http://{}:{}", self.config.host, self.config.web_port);
+        let jolokia_url = format!("{}/console/jolokia/", base_url.trim_end_matches('/'));
+        
+        // Normalize destination name by removing STOMP prefixes
+        let normalized_name = normalize_destination_name(queue_name);
+        
+        // Build the MBean name for Artemis queue metrics
+        let mbean_name = format!(
+            "org.apache.activemq.artemis:address=\"{}\",broker=\"{}\",component=addresses,queue=\"{}\",routing-type=\"{}\",subcomponent=queues",
+            normalized_name, self.config.broker_name, normalized_name, routing_type
+        );
+        
+        let request_payload = json!({
+            "type": "read",
+            "mbean": mbean_name,
+            "attribute": ["ConsumerCount", "MessageCount"]
+        });
+        
+        debug!("Fetching Artemis queue metrics for '{}' with routing-type '{}'", queue_name, routing_type);
+        
+        // Make the HTTP POST request with JSON payload
+        let response = self.client.post(&jolokia_url)
+            .basic_auth(&self.config.username, Some(&self.config.password))
+            .header("Origin", format!("http://{}:{}", self.config.host, self.config.web_port))
+            .header("Content-Type", "application/json")
+            .json(&request_payload)
+            .send()
+            .await
+            .map_err(MonitoringError::HttpError)?;
+
+        // Check HTTP status
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(MonitoringError::BrokerAPIError(format!(
+                "HTTP {} - {}",
+                status, error_text
+            )));
+        }
+
+        // Parse JSON response
+        let jolokia_response: JolokiaResponse = response
+            .json()
+            .await
+            .map_err(|e| MonitoringError::HttpError(e))?;
+
+        // Check Jolokia status
+        if jolokia_response.status != 200 {
+            let error_msg = jolokia_response
+                .error
+                .unwrap_or_else(|| format!("Jolokia status: {}", jolokia_response.status));
+            return Err(MonitoringError::BrokerAPIError(error_msg));
+        }
+
+        // Extract metrics from the response
+        self.parse_artemis_queue_metrics(queue_name, jolokia_response.value)
+    }
+
+    /// Parse queue metrics from Artemis Jolokia response
+    fn parse_artemis_queue_metrics(&self, queue_name: &str, value: Value) -> Result<QueueMetrics, MonitoringError> {
+        debug!("Parsing Artemis metrics for queue '{}': {}", queue_name, value);
+
+        // Extract individual metrics with defaults
+        // Artemis uses MessageCount instead of QueueSize
+        let queue_size = value
+            .get("MessageCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
+        let consumer_count = value
+            .get("ConsumerCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
+        // Artemis doesn't have these metrics in the same format, use defaults
+        let enqueue_count = 0u64; // Not available in this endpoint
+        let dequeue_count = 0u64; // Not available in this endpoint
+        let memory_percent_usage = 0.0; // Not available in this endpoint
+
+        let metrics = QueueMetrics {
+            queue_name: queue_name.to_string(),
+            queue_size,
+            consumer_count,
+            enqueue_count,
+            dequeue_count,
+            memory_percent_usage,
+        };
+
+        debug!("Parsed Artemis metrics for '{}': {:?}", queue_name, metrics);
+        Ok(metrics)
+    }
+
+    /// Calculate exponential backoff delay for retries
+    fn calculate_retry_delay(&self, attempt: u32) -> Duration {
+        let base_delay_ms = 1000; // 1 second base delay
+        let max_delay_ms = 30000;  // 30 seconds max delay
+        let multiplier: f64 = 2.0;
+
+        let delay_ms = (base_delay_ms as f64) * multiplier.powi(attempt.saturating_sub(1) as i32);
+        let capped_delay_ms = delay_ms.min(max_delay_ms as f64) as u64;
+
+        Duration::from_millis(capped_delay_ms)
+    }
+}
+
+#[async_trait]
+impl BrokerMonitor for ArtemisMonitor {
+    async fn get_queue_metrics(&mut self, queue_name: &str) -> Result<QueueMetrics, MonitoringError> {
+        let mut attempts = 0;
+        let max_attempts = self.max_retries + 1;
+
+        while attempts < max_attempts {
+            match self.fetch_queue_metrics(queue_name).await {
+                Ok(metrics) => {
+                    // Reset retry count on success
+                    self.retry_count = 0;
+                    return Ok(metrics);
+                }
+                Err(e) => {
+                    attempts += 1;
+                    self.retry_count += 1;
+                    
+                    if attempts >= max_attempts {
+                        error!("Failed to fetch queue metrics for '{}' after {} attempts: {}", 
+                               queue_name, max_attempts, e);
+                        return Err(e);
+                    }
+
+                    let delay = self.calculate_retry_delay(attempts);
+                    warn!("Attempt {}/{} failed for queue '{}': {}. Retrying in {}ms", 
+                          attempts, max_attempts, queue_name, e, delay.as_millis());
+                    sleep(delay).await;
+                }
+            }
+        }
+
+        Err(MonitoringError::BrokerAPIError("Exhausted all retry attempts".to_string()))
+    }
+
+    async fn get_multiple_queue_metrics(&mut self, queue_names: &[String]) -> Vec<(String, Result<QueueMetrics, MonitoringError>)> {
         let mut results = Vec::new();
 
         // For now, fetch sequentially to avoid overwhelming the server
-        // In production, you might want to implement concurrent fetching with rate limiting
         for queue_name in queue_names {
             let result = self.get_queue_metrics(queue_name).await;
             results.push((queue_name.clone(), result));
@@ -230,15 +437,97 @@ impl ActiveMQMonitor {
         results
     }
 
-    /// Health check - verify connectivity to ActiveMQ management API
-    pub async fn health_check(&mut self) -> Result<bool> {
+    async fn health_check(&mut self) -> Result<bool> {
+        let base_url = format!("http://{}:{}", self.config.host, self.config.web_port);
+        let jolokia_url = format!("{}/console/jolokia/", base_url.trim_end_matches('/'));
+        
+        let request_payload = json!({
+            "type": "version"
+        });
+
+        debug!("Artemis health check URL: {}", jolokia_url);
+
+        let request_builder = self.client.post(&jolokia_url)
+            .basic_auth(&self.config.username, Some(&self.config.password))
+            .header("Origin", format!("http://{}:{}", self.config.host, self.config.web_port))
+            .header("Content-Type", "application/json")
+            .json(&request_payload);
+
+        match request_builder.send().await {
+            Ok(response) if response.status().is_success() => {
+                info!("Artemis management API health check passed");
+                Ok(true)
+            }
+            Ok(response) => {
+                warn!("Artemis health check failed with status: {}", response.status());
+                Ok(false)
+            }
+            Err(e) => {
+                error!("Artemis health check error: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    fn broker_type(&self) -> &'static str {
+        "Artemis"
+    }
+}
+
+#[async_trait]
+impl BrokerMonitor for ActiveMQMonitor {
+    async fn get_queue_metrics(&mut self, queue_name: &str) -> Result<QueueMetrics, MonitoringError> {
+        let mut attempts = 0;
+        let max_attempts = self.max_retries + 1;
+
+        while attempts < max_attempts {
+            match self.fetch_queue_metrics(queue_name).await {
+                Ok(metrics) => {
+                    // Reset retry count on success
+                    self.retry_count = 0;
+                    return Ok(metrics);
+                }
+                Err(e) => {
+                    attempts += 1;
+                    self.retry_count += 1;
+                    
+                    if attempts >= max_attempts {
+                        error!("Failed to fetch queue metrics for '{}' after {} attempts: {}", 
+                               queue_name, max_attempts, e);
+                        return Err(e);
+                    }
+
+                    let delay = self.calculate_retry_delay(attempts);
+                    warn!("Attempt {}/{} failed for queue '{}': {}. Retrying in {}ms", 
+                          attempts, max_attempts, queue_name, e, delay.as_millis());
+                    sleep(delay).await;
+                }
+            }
+        }
+
+        Err(MonitoringError::BrokerAPIError("Exhausted all retry attempts".to_string()))
+    }
+
+    async fn get_multiple_queue_metrics(&mut self, queue_names: &[String]) -> Vec<(String, Result<QueueMetrics, MonitoringError>)> {
+        let mut results = Vec::new();
+
+        // For now, fetch sequentially to avoid overwhelming the server
+        for queue_name in queue_names {
+            let result = self.get_queue_metrics(queue_name).await;
+            results.push((queue_name.clone(), result));
+        }
+
+        results
+    }
+
+    async fn health_check(&mut self) -> Result<bool> {
         let base_url = format!("http://{}:{}", self.config.host, self.config.web_port);
         let health_url = format!(
             "{}/api/jolokia/version",
             base_url.trim_end_matches('/')
         );
 
-        debug!("Health check URL: {}", health_url);
+        debug!("ActiveMQ health check URL: {}", health_url);
 
         let request_builder = self.client.get(&health_url)
             .basic_auth(&self.config.username, Some(&self.config.password));
@@ -249,13 +538,31 @@ impl ActiveMQMonitor {
                 Ok(true)
             }
             Ok(response) => {
-                warn!("ActiveMQ management API health check failed: HTTP {}", response.status());
+                warn!("ActiveMQ health check failed with status: {}", response.status());
                 Ok(false)
             }
             Err(e) => {
-                error!("ActiveMQ management API health check error: {}", e);
+                error!("ActiveMQ health check error: {}", e);
                 Err(e.into())
             }
+        }
+    }
+
+    fn broker_type(&self) -> &'static str {
+        "ActiveMQ"
+    }
+}
+
+/// Factory function to create appropriate monitor based on broker type
+pub fn create_broker_monitor(config: BrokerConfig) -> Result<Box<dyn BrokerMonitor>> {
+    match config.broker_type {
+        BrokerType::ActiveMQ => {
+            let monitor = ActiveMQMonitor::new(config)?;
+            Ok(Box::new(monitor))
+        }
+        BrokerType::Artemis => {
+            let monitor = ArtemisMonitor::new(config)?;
+            Ok(Box::new(monitor))
         }
     }
 }
@@ -265,8 +572,9 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn create_test_config() -> ActiveMQConfig {
-        ActiveMQConfig {
+    fn create_test_config() -> BrokerConfig {
+        BrokerConfig {
+            broker_type: BrokerType::ActiveMQ,
             host: "localhost".to_string(),
             stomp_port: 61613,
             web_port: 8161,
@@ -277,8 +585,9 @@ mod tests {
         }
     }
 
-    fn create_custom_config(host: &str, web_port: u16, broker_name: &str) -> ActiveMQConfig {
-        ActiveMQConfig {
+    fn create_custom_config(host: &str, web_port: u16, broker_name: &str) -> BrokerConfig {
+        BrokerConfig {
+            broker_type: BrokerType::ActiveMQ,
             host: host.to_string(),
             stomp_port: 61613,
             web_port,
@@ -571,10 +880,10 @@ mod tests {
 
     #[test]
     fn test_monitoring_error_display() {
-        // Test ActiveMQ error
-        let activemq_error = MonitoringError::ActiveMQError("Test error".to_string());
-        let display_str = format!("{}", activemq_error);
-        assert!(display_str.contains("ActiveMQ API error: Test error"));
+        // Test Broker API error
+        let broker_error = MonitoringError::BrokerAPIError("Test error".to_string());
+        let display_str = format!("{}", broker_error);
+        assert!(display_str.contains("Broker API error: Test error"));
 
         // Test config error
         let config_error = MonitoringError::ConfigError("Invalid config".to_string());
@@ -598,9 +907,9 @@ mod tests {
 
     #[test]
     fn test_monitoring_error_debug() {
-        let error = MonitoringError::ActiveMQError("Debug test".to_string());
+        let error = MonitoringError::BrokerAPIError("Debug test".to_string());
         let debug_str = format!("{:?}", error);
-        assert!(debug_str.contains("ActiveMQError"));
+        assert!(debug_str.contains("BrokerAPIError"));
         assert!(debug_str.contains("Debug test"));
     }
 
@@ -660,7 +969,8 @@ mod tests {
 
     #[test]
     fn test_config_values_in_monitor() {
-        let config = ActiveMQConfig {
+        let config = BrokerConfig {
+            broker_type: BrokerType::ActiveMQ,
             host: "test-host".to_string(),
             stomp_port: 12345,
             web_port: 54321,

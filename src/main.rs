@@ -1,19 +1,11 @@
 use anyhow::Result;
 use stomp_activemq_autoscale::runner::StompRunner;
 use stomp_activemq_autoscale::utils;
-use tracing::debug;
-
-// Custom handler for processing order messages
-async fn handle_order_message(message: String) -> Result<()> {
-    debug!("🛒 Processing ORDER: {}", message);
-    // Simulate some processing time
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    Ok(())
-}
+use tracing::info;
 
 // Custom handler for processing notification messages
 async fn handle_notification_message(message: String) -> Result<()> {
-    debug!("🔔 Processing NOTIFICATION: {}", message);
+    info!("🔔 Processing NOTIFICATION: {}", message);
     // Simulate some processing time
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     Ok(())
@@ -21,7 +13,7 @@ async fn handle_notification_message(message: String) -> Result<()> {
 
 // Custom handler for processing API request messages
 async fn handle_api_request_message(message: String) -> Result<()> {
-    debug!("🌐 Processing API REQUEST: {}", message);
+    info!("🌐 Processing API REQUEST: {}", message);
     // Simulate API processing
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     Ok(())
@@ -29,7 +21,7 @@ async fn handle_api_request_message(message: String) -> Result<()> {
 
 // Custom handler for processing general messages
 async fn handle_general_message(message: String) -> Result<()> {
-    debug!("🛒 Processing GENERAL: {}", message);
+    info!("🛒 Processing GENERAL: {}", message);
     // Simulate some processing time
     tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
     Ok(())
@@ -60,7 +52,6 @@ async fn main() -> Result<()> {
         .with_config(config)
         .add_queue("default", handle_general_message)  // Handler for default queue
         .add_queue("errorsx", handle_general_message)  // Handler for errorsx queue
-        .add_queue("modern_major_general_0", handle_general_message)  // Handler for modern_major_general_0 queue
         .add_queue("api_requests", handle_api_request_message)  // Handler for api_requests queue
         .add_topic("notifications", handle_notification_message)  // Handler for notifications topic
         .run()

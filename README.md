@@ -1,12 +1,13 @@
 # STOMP Auto-Scaling Service
 
-A production-ready STOMP messaging service implemented in Rust with intelligent auto-scaling capabilities, comprehensive error handling, and automatic reconnection features.
+A production-ready STOMP messaging service implemented in Rust with intelligent auto-scaling capabilities, comprehensive error handling, and automatic reconnection features. Supports both **ActiveMQ** and **Apache Artemis** brokers.
 
 ## ✨ Key Features
 
 ### 🎯 Auto-Scaling Engine
 - **Dynamic Worker Management**: Automatically scale consumer workers based on real-time queue metrics
-- **ActiveMQ Integration**: Real-time monitoring via ActiveMQ's Jolokia REST API
+- **Multi-Broker Support**: Works with both ActiveMQ and Apache Artemis
+- **Real-time Monitoring**: Monitors via broker's Jolokia REST API
 - **Smart Scaling Logic**: Configurable thresholds with cooldown periods to prevent flapping
 - **Flexible Configuration**: Set min/max worker limits per queue with fallback to static mode
 
@@ -24,7 +25,7 @@ A production-ready STOMP messaging service implemented in Rust with intelligent 
 
 ### How Auto-Scaling Works
 
-1. **Monitor**: Query ActiveMQ every 5 seconds (configurable) for queue metrics
+1. **Monitor**: Query broker every 5 seconds (configurable) for queue metrics
 2. **Decide**: Compare queue depth with current worker count
 3. **Scale**: Dynamically spawn/stop workers while maintaining connections
 4. **Cool Down**: 30-second cooldown prevents rapid scaling changes
@@ -33,8 +34,8 @@ A production-ready STOMP messaging service implemented in Rust with intelligent 
 
 ### Prerequisites
 - Rust 1.70.0 or later
-- ActiveMQ or compatible STOMP broker
-- ActiveMQ management console (for auto-scaling)
+- ActiveMQ or Apache Artemis STOMP broker
+- Broker management console (for auto-scaling)
 
 ### Installation & Setup
 
@@ -45,7 +46,7 @@ A production-ready STOMP messaging service implemented in Rust with intelligent 
    ```
 
 2. **Configure the service**
-   Create or update `config.yaml` with your ActiveMQ settings:
+   Create or update `config.yaml` with your broker settings:
    ```yaml
    # Service metadata
    service:
@@ -53,15 +54,16 @@ A production-ready STOMP messaging service implemented in Rust with intelligent 
      version: "1.0.0"
      description: "Production STOMP messaging service"
 
-   # Unified ActiveMQ configuration
-   activemq:
-     host: "localhost"              # ActiveMQ server host
-     username: "admin"              # STOMP credentials
+   # Broker configuration (supports ActiveMQ and Artemis)
+   broker:
+     type: "activemq"             # Broker type: "activemq" or "artemis"
+     host: "localhost"            # Broker server host
+     username: "admin"            # STOMP credentials
      password: "admin"
-     stomp_port: 61613             # STOMP messaging port
-     web_port: 8161               # Web console port (for monitoring)
-     heartbeat_secs: 30           # Connection heartbeat
-     broker_name: "localhost"     # ActiveMQ broker name
+     stomp_port: 61613           # STOMP messaging port
+     web_port: 8161             # Web console port (for monitoring)
+     heartbeat_secs: 30         # Connection heartbeat
+     broker_name: "localhost"   # Broker name (ActiveMQ: "localhost", Artemis: "broker")
 
    # Message destinations
    destinations:
@@ -104,20 +106,49 @@ A production-ready STOMP messaging service implemented in Rust with intelligent 
 
 ## 📖 Documentation
 
-### Configuration Reference
+### Multi-Broker Support
 
-### Configuration Reference
+The service supports both **ActiveMQ** and **Apache Artemis** brokers through a unified configuration:
 
-#### ActiveMQ Settings (Unified Configuration)
+#### ActiveMQ Configuration
 ```yaml
-activemq:
-  host: "localhost"               # ActiveMQ server hostname
-  username: "admin"               # STOMP authentication username
-  password: "admin"               # STOMP authentication password
-  stomp_port: 61613              # STOMP messaging port
-  web_port: 8161                 # ActiveMQ web console port (for monitoring)
-  heartbeat_secs: 30             # Connection heartbeat interval
-  broker_name: "localhost"       # ActiveMQ broker name for API queries
+broker:
+  type: "activemq"
+  host: "localhost"
+  broker_name: "localhost"       # ActiveMQ uses "localhost"
+  # ... other settings
+  
+destinations:
+  queues:
+    default: "/queue/demo"       # Standard ActiveMQ queue format
+```
+
+#### Apache Artemis Configuration  
+```yaml
+broker:
+  type: "artemis"
+  host: "10.0.7.127"
+  broker_name: "broker"          # Artemis typically uses "broker"
+  # ... other settings
+  
+destinations:
+  queues:
+    default: "jns.db.transaction" # Artemis queue format (no /queue/ prefix)
+```
+
+### Configuration Reference
+
+#### Broker Settings (Unified Configuration)
+```yaml
+broker:
+  type: "activemq"               # Broker type: "activemq" or "artemis"
+  host: "localhost"              # Broker server hostname
+  username: "admin"              # STOMP authentication username
+  password: "admin"              # STOMP authentication password
+  stomp_port: 61613             # STOMP messaging port
+  web_port: 8161                # Web console port (for monitoring)
+  heartbeat_secs: 30            # Connection heartbeat interval
+  broker_name: "localhost"      # Broker name for API queries
 ```
 
 #### Auto-Scaling Configuration

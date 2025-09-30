@@ -790,7 +790,7 @@ impl StompRunner {
             let handler = custom_handler.clone();
             Box::pin(async move {
                 let start_time = std::time::Instant::now();
-                info!(
+                debug!(
                     "[{}] Processing message with custom handler: {}",
                     queue_name,
                     msg.chars().take(50).collect::<String>()
@@ -802,7 +802,7 @@ impl StompRunner {
                 let processing_time = start_time.elapsed();
                 match &result {
                     Ok(()) => {
-                        info!(
+                        debug!(
                             "[{}] ✅ Message processed successfully in {}ms",
                             queue_name,
                             processing_time.as_millis()
@@ -858,7 +858,8 @@ mod tests {
                 version: "1.0.0".to_string(),
                 description: "Test service".to_string(),
             },
-            activemq: ActiveMQConfig {
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
                 host: "localhost".to_string(),
                 stomp_port: 61613,
                 web_port: 8161,

@@ -374,7 +374,8 @@ mod tests {
                 version: "1.0.0".to_string(),
                 description: "Test service".to_string(),
             },
-            activemq: ActiveMQConfig {
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
                 host: "localhost".to_string(),
                 stomp_port: 61613,
                 web_port: 8161,

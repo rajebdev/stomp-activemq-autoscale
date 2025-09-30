@@ -5,17 +5,18 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 
+use crate::broker_monitor::BrokerMonitor;
 use crate::config::{Config, WorkerRange};
 use crate::consumer_pool::ConsumerPool;
-use crate::monitor::{ActiveMQMonitor, QueueMetrics};
+use crate::monitor::{create_broker_monitor, QueueMetrics};
 use crate::scaling::{ScalingDecision, ScalingEngine};
 
 /// Auto-scaling service that manages consumer pools and scaling decisions
 pub struct AutoScaler {
     /// Configuration
     config: Config,
-    /// ActiveMQ monitoring client
-    monitor: ActiveMQMonitor,
+    /// Broker monitoring client (trait object)
+    monitor: Box<dyn BrokerMonitor>,
     /// Scaling decision engine
     scaling_engine: ScalingEngine,
     /// Consumer pools mapped by queue name
@@ -31,15 +32,16 @@ impl AutoScaler {
         consumer_pools: HashMap<String, ConsumerPool>,
         shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<Self> {
-        // Create ActiveMQ monitor using unified config
-        let monitor = ActiveMQMonitor::new(config.activemq.clone())?;
+        // Create broker monitor using factory
+        let monitor = create_broker_monitor(config.broker.clone())?;
 
         // Create scaling engine
         let scaling_engine = ScalingEngine::new(0); // Parameter not used anymore
 
         info!(
-            "🎯 Auto-scaler initialized with {} queues",
-            consumer_pools.len()
+            "🎯 Auto-scaler initialized with {} queues using {} broker",
+            consumer_pools.len(),
+            monitor.broker_type()
         );
 
         Ok(Self {
@@ -65,16 +67,16 @@ impl AutoScaler {
         info!("⏰ Monitoring will check queue metrics every {} seconds", interval_secs);
 
         // Perform initial health check
-        info!("🩺 Performing initial ActiveMQ health check...");
+        info!("🩺 Performing initial {} health check...", self.monitor.broker_type());
         match self.monitor.health_check().await {
             Ok(true) => {
-                info!("✅ ActiveMQ health check PASSED - Ready for monitoring");
+                info!("✅ {} health check PASSED - Ready for monitoring", self.monitor.broker_type());
             }
             Ok(false) => {
-                warn!("⚠️ ActiveMQ health check FAILED - Will continue but metrics may not work");
+                warn!("⚠️ {} health check FAILED - Will continue but metrics may not work", self.monitor.broker_type());
             }
             Err(e) => {
-                error!("❌ ActiveMQ health check ERROR: {} - Will continue but metrics may not work", e);
+                error!("❌ {} health check ERROR: {} - Will continue but metrics may not work", self.monitor.broker_type(), e);
             }
         }
 
@@ -429,7 +431,8 @@ mod tests {
                 version: "1.0.0".to_string(),
                 description: "Test service".to_string(),
             },
-            activemq: ActiveMQConfig {
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
                 host: "localhost".to_string(),
                 stomp_port: 61613,
                 web_port: 8161,
@@ -937,8 +940,8 @@ mod tests {
         let autoscaler = AutoScaler::new(config, consumer_pools, shutdown_rx).unwrap();
         
         // Verify config was set correctly
-        assert_eq!(autoscaler.config.activemq.host, "localhost");
-        assert_eq!(autoscaler.config.activemq.web_port, 8161);
+        assert_eq!(autoscaler.config.broker.host, "localhost");
+        assert_eq!(autoscaler.config.broker.web_port, 8161);
         assert_eq!(autoscaler.config.scaling.enabled, true);
         assert_eq!(autoscaler.config.scaling.interval_secs, 5);
     }

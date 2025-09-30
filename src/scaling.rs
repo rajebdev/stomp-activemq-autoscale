@@ -160,7 +160,7 @@ impl ScalingEngine {
         let queue_size = metrics.queue_size;
 
         debug!(
-            "🔍 Evaluating scaling for '{}': queue_size={}, workers={}, range={}-{}, activemq_consumers={}",
+            "🔍 Evaluating scaling for '{}': queue_size={}, workers={}, range={}-{}, broker_consumers={}",
             queue_name, queue_size, current_workers, worker_range.min, worker_range.max, metrics.consumer_count
         );
 
