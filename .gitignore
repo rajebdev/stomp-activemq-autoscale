@@ -37,3 +37,6 @@ Thumbs.db
 
 # Configuration (keep the sample)
 config.yaml
+sonar.env
+.scannerwork/
+build_rs_cov.profraw
