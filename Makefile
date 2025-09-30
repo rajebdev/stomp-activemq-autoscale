@@ -64,24 +64,12 @@ logs:
 stats:
 	@$(DOCKER_STATS_CMD)
 
-sonar: clippy coverage normalize
+sonar: #clippy coverage normalize
 	@$(SONARQUBE_CMD)
 
 normalize:
 	@sed -E -i 's~^SF:.*[/\\]src[/\\]~SF:src/~g' target/lcov.info
-	@awk '\
-		/^FNDA:/ {\
-			split($$0,a,",");\
-			split(a[1],b,":");\
-			cnt=b[2]+0;\
-			if(cnt>1000000){print "FNDA:1," a[2]} else {print}\
-			next\
-		}\
-		/^DA:/ {\
-			split($$0,a,",");\
-			cnt=a[2]+0;\
-			if(cnt>1000000){print "DA:" a[1] ",1"} else {print}\
-			next\
-		}\
-		{print}\
-	' target/lcov.info > target/lcov_temp.info && mv target/lcov_temp.info target/lcov.info
+	@awk '{sub(/^DA:DA:/,"DA:"); \
+		if($$0~/^FNDA:[0-9]+,/){split($$0,a,":"); split(a[2],b,","); if(b[1]+0>1000000){$$0="FNDA:1," substr(a[2],index(a[2],",")+1)}} \
+		else if($$0~/^DA:[0-9]+,[0-9]+(,[0-9A-Fa-f]+)?$$/){split($$0,a,":"); split(a[2],b,","); if(b[2]+0>1000000){$$0="DA:" b[1] ",1" (b[3] ? "," b[3] : "")}}; \
+		print}' target/lcov.info > target/lcov_temp.info && mv target/lcov.info target/lcov_original.info && mv target/lcov_temp.info target/lcov.info
