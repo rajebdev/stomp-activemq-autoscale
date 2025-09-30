@@ -64,7 +64,7 @@ logs:
 stats:
 	@$(DOCKER_STATS_CMD)
 
-sonar: #clippy coverage normalize
+sonar: clippy coverage normalize
 	@$(SONARQUBE_CMD)
 
 normalize:
