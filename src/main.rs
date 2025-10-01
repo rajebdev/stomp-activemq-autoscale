@@ -1,7 +1,8 @@
 use anyhow::Result;
-use stomp_activemq_autoscale::runner::StompRunner;
+use stomp_activemq_autoscale::service::StompService;
 use stomp_activemq_autoscale::utils;
 use tracing::info;
+use std::collections::HashMap;
 
 // Custom handler for processing notification messages
 async fn handle_notification_message(message: String) -> Result<()> {
@@ -48,22 +49,27 @@ async fn main() -> Result<()> {
     
     // Example 1: Use configuration with custom handlers
     // Note: Whether queues use auto-scaling or static workers is determined by config.yaml
-    StompRunner::new()
-        .with_config(config)
+    let mut stomp_service = StompService::new(config).await?;
+
+    stomp_service.connect().await?;
+    stomp_service.send_queue("test_queue", "Test message from main", HashMap::new()).await?;
+
+    stomp_service
         .add_queue("default", handle_general_message)  // Handler for default queue
         .add_queue("errorsx", handle_general_message)  // Handler for errorsx queue
         .add_queue("api_requests", handle_api_request_message)  // Handler for api_requests queue
         .add_topic("notifications", handle_notification_message)  // Handler for notifications topic
         .run()
         .await
+    
+    // stomp_service.send_queue("test_queue", "Test message from main", HashMap::new()).await
 
     // Alternative examples (commented out):
     
     // Example 2: Simple setup using config file directly in main
     /*
     let config = utils::load_configuration("config.yaml")?;
-    StompRunner::new()
-        .with_config(config)
+    StompService::new(config).await?
         .run()
         .await
     */
@@ -77,8 +83,7 @@ async fn main() -> Result<()> {
     });
     
     let config = utils::load_configuration("config.yaml")?;
-    StompRunner::new()
-        .with_config(config)
+    StompService::new(config).await?
         .add_queue("user_events", |msg| async move {
             debug!("👤 User event: {}", msg);
             Ok(())
