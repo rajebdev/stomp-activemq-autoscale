@@ -40,3 +40,6 @@ config.yaml
 sonar.env
 .scannerwork/
 build_rs_cov.profraw
+
+
+.wiki
