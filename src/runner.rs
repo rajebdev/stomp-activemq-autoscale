@@ -24,7 +24,6 @@ pub type AutoScaleHandlerFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = 
 pub struct QueueConfig {
     pub name: String,
     pub handler: Option<MessageHandlerFn>,
-    pub auto_scaling: bool,
 }
 
 /// Configuration for a topic with custom handler
@@ -94,7 +93,6 @@ impl StompRunner {
         self.queue_configs.push(QueueConfig {
             name: queue_name.to_string(),
             handler: Some(handler_fn),
-            auto_scaling: true, // This will be determined by config at runtime
         });
         self
     }

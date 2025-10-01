@@ -779,11 +779,6 @@ impl StompClient {
 
         Ok(())
     }
-
-    /// Get service configuration
-    pub fn get_config(&self) -> &Config {
-        &self.config
-    }
 }
 
 #[cfg(test)]

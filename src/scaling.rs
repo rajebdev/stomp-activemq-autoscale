@@ -19,8 +19,6 @@ pub enum ScalingDecision {
 /// Historical metrics for a queue to prevent flapping
 #[derive(Debug, Clone)]
 pub struct QueueHistory {
-    /// Queue name
-    pub queue_name: String,
     /// Last metrics recorded
     pub last_metrics: Option<QueueMetrics>,
     /// Last scaling decision timestamp
@@ -34,9 +32,8 @@ pub struct QueueHistory {
 }
 
 impl QueueHistory {
-    pub fn new(queue_name: String, worker_range: WorkerRange, current_workers: u32) -> Self {
+    pub fn new(worker_range: WorkerRange, current_workers: u32) -> Self {
         Self {
-            queue_name,
             last_metrics: None,
             last_scaling_time: None,
             current_workers,
@@ -89,7 +86,7 @@ impl ScalingEngine {
             queue_name, worker_range.min, worker_range.max, current_workers
         );
 
-        let history = QueueHistory::new(queue_name.clone(), worker_range, current_workers);
+        let history = QueueHistory::new(worker_range, current_workers);
         self.queue_histories.insert(queue_name, history);
     }
 
@@ -218,24 +215,13 @@ impl ScalingEngine {
             );
         }
 
+        
         debug!("🔴 No scaling action needed for queue '{}'", queue_name);
         ScalingDecision::NoChange
     }
+}
 
-    /// Get current queue history for debugging
-    pub fn get_queue_history(&self, queue_name: &str) -> Option<&QueueHistory> {
-        self.queue_histories.get(queue_name)
-    }
-
-    /// Get all registered queues
-    pub fn get_registered_queues(&self) -> Vec<&str> {
-        self.queue_histories.keys().map(|s| s.as_str()).collect()
-    }
-
-    /// Get current scale down buffer
-    pub fn get_scale_down_buffer(&self) -> u32 {
-        self.scale_down_buffer
-    }
+#[cfg(test)]
 
     /// Remove a queue from monitoring (e.g., when shutting down)
     pub fn unregister_queue(&mut self, queue_name: &str) -> bool {
@@ -247,25 +233,6 @@ impl ScalingEngine {
             None => false,
         }
     }
-
-    /// Get metrics summary for all registered queues
-    pub fn get_metrics_summary(&self) -> HashMap<String, (u32, u32, WorkerRange)> {
-        let mut summary = HashMap::new();
-        
-        for (queue_name, history) in &self.queue_histories {
-            let queue_size = history.last_metrics.as_ref()
-                .map(|m| m.queue_size)
-                .unwrap_or(0);
-            
-            summary.insert(
-                queue_name.clone(),
-                (queue_size, history.current_workers, history.worker_range.clone()),
-            );
-        }
-        
-        summary
-    }
-}
 
 #[cfg(test)]
 mod tests {

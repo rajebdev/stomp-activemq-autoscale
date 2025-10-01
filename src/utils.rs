@@ -1,21 +1,5 @@
-use anyhow::Result;
-use crate::config::Config;
-use crate::client::StompClient;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 use tokio::signal;
-use tokio::time::{sleep, Duration};
-use std::collections::HashMap;
-
-/// Display startup information
-pub fn display_startup_info(config: &Config) {
-    info!(
-        "🚀 Starting Auto-Scaling STOMP Application: {}",
-        config.service.name
-    );
-    info!("📋 Version: {}", config.service.version);
-    info!("📄 Description: {}", config.service.description);
-    info!("🔗 Broker: {}:{}", config.broker.host, config.broker.stomp_port);
-}
 
 /// Setup signal handlers for graceful shutdown
 pub async fn setup_signal_handlers() {

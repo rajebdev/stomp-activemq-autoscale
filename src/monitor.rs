@@ -20,10 +20,6 @@ pub enum MonitoringError {
     JsonError(#[from] serde_json::Error),
     #[error("Broker API error: {0}")]
     BrokerAPIError(String),
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
-    #[error("Network timeout")]
-    Timeout,
 }
 
 /// Queue metrics returned from message broker

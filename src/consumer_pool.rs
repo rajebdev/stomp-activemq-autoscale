@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
@@ -25,17 +24,6 @@ pub struct WorkerInfo {
     pub handle: JoinHandle<Result<()>>,
     /// Shutdown sender for this worker
     pub shutdown_tx: broadcast::Sender<()>,
-    /// Worker status
-    pub status: WorkerStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum WorkerStatus {
-    Starting,
-    Running,
-    Stopping,
-    Stopped,
-    Failed,
 }
 
 /// Consumer pool for managing workers for a specific queue
@@ -123,7 +111,6 @@ impl ConsumerPool {
             id: worker_id.clone(),
             handle,
             shutdown_tx,
-            status: WorkerStatus::Starting,
         };
 
         let mut workers = self.workers.lock().await;
@@ -331,23 +318,6 @@ impl ConsumerPool {
 
         info!("✅ All workers stopped for queue '{}'", self.queue_name);
         Ok(())
-    }
-
-    /// Get queue name
-    pub fn get_queue_name(&self) -> &str {
-        &self.queue_name
-    }
-
-    /// Get worker status summary
-    pub async fn get_status_summary(&self) -> HashMap<WorkerStatus, usize> {
-        let workers = self.workers.lock().await;
-        let mut summary = HashMap::new();
-
-        for worker in workers.iter() {
-            *summary.entry(worker.status.clone()).or_insert(0) += 1;
-        }
-
-        summary
     }
 }
 
@@ -702,28 +672,6 @@ mod tests {
     }
 
     #[test]
-    fn test_worker_status_equality() {
-        assert_eq!(WorkerStatus::Running, WorkerStatus::Running);
-        assert_ne!(WorkerStatus::Running, WorkerStatus::Stopped);
-        assert_eq!(WorkerStatus::Starting, WorkerStatus::Starting);
-        assert_ne!(WorkerStatus::Starting, WorkerStatus::Failed);
-    }
-
-    #[test]
-    fn test_worker_status_clone() {
-        let status = WorkerStatus::Running;
-        let cloned = status.clone();
-        assert_eq!(status, cloned);
-    }
-
-    #[test]
-    fn test_worker_status_debug() {
-        let status = WorkerStatus::Running;
-        let debug_str = format!("{:?}", status);
-        assert_eq!(debug_str, "Running");
-    }
-
-    #[test]
     fn test_worker_range() {
         let range = WorkerRange { min: 2, max: 5, is_fixed: false };
         assert_eq!(range.min, 2);
@@ -745,12 +693,12 @@ mod tests {
             id: "test-worker".to_string(),
             handle,
             shutdown_tx,
-            status: WorkerStatus::Running,
+            status: WorkerStatus::Starting,
         };
 
         let debug_str = format!("{:?}", worker_info);
         assert!(debug_str.contains("test-worker"));
-        assert!(debug_str.contains("Running"));
+        assert!(debug_str.contains("Starting"));
     }
 
     #[tokio::test]

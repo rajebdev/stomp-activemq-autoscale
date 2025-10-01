@@ -6,7 +6,7 @@ use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::broker_monitor::BrokerMonitor;
-use crate::config::{Config, WorkerRange};
+use crate::config::Config;
 use crate::consumer_pool::ConsumerPool;
 use crate::monitor::{create_broker_monitor, QueueMetrics};
 use crate::scaling::{ScalingDecision, ScalingEngine};
@@ -339,36 +339,6 @@ impl AutoScaler {
         Ok(())
     }
 
-    /// Get current status of all queues and workers
-    pub async fn get_status(&self) -> HashMap<String, QueueStatus> {
-        let mut status = HashMap::new();
-        let consumer_pools = self.consumer_pools.lock().await;
-
-        for (queue_name, pool) in consumer_pools.iter() {
-            let worker_count = pool.get_worker_count().await;
-            let worker_range = pool.get_worker_range().clone();
-            
-            // Get last metrics from scaling engine
-            let last_metrics = self
-                .scaling_engine
-                .get_queue_history(queue_name)
-                .and_then(|h| h.last_metrics.as_ref());
-
-            status.insert(
-                queue_name.clone(),
-                QueueStatus {
-                    queue_name: queue_name.clone(),
-                    current_workers: worker_count as u32,
-                    worker_range,
-                    last_queue_size: last_metrics.map(|m| m.queue_size).unwrap_or(0),
-                    last_consumer_count: last_metrics.map(|m| m.consumer_count).unwrap_or(0),
-                },
-            );
-        }
-
-        status
-    }
-
     /// Stop all consumer pools
     pub async fn stop_all_pools(&self) -> Result<()> {
         info!("🛑 Stopping all consumer pools");
@@ -385,16 +355,6 @@ impl AutoScaler {
         info!("✅ All consumer pools stopped");
         Ok(())
     }
-}
-
-/// Status information for a queue
-#[derive(Debug, Clone)]
-pub struct QueueStatus {
-    pub queue_name: String,
-    pub current_workers: u32,
-    pub worker_range: WorkerRange,
-    pub last_queue_size: u32,
-    pub last_consumer_count: u32,
 }
 
 #[cfg(test)]
