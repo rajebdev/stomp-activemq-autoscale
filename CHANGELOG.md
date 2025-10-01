@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-01-01
+
+### Changed
+- 🔧 **Enhanced queue name extraction logic** for better destination handling
+- 🏗️ **Simplified destination name handling** for cleaner code architecture
+
+### Added
+- 🧪 **Comprehensive test coverage** for STOMP producer and listener components
+- 📦 **Version alignment** updated Cargo.toml to maintain consistency
+
+### Improvements
+- Refactored configuration module for better maintainability
+- Enhanced code structure with simplified destination management
+- Added extensive unit tests for core STOMP functionality
+- Better error handling and validation in configuration parsing
+
 ## [0.1.0] - 2025-01-01
 
 ### Added
@@ -75,5 +91,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dead Letter Queue (DLQ) patterns for error handling
 - Health checks and monitoring endpoints ready
 
-[Unreleased]: https://github.com/username/stomp-activemq-autoscale/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/username/stomp-activemq-autoscale/releases/tag/v0.1.0
+[Unreleased]: https://github.com/rajebdev/stomp-activemq-autoscale/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/rajebdev/stomp-activemq-autoscale/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/rajebdev/stomp-activemq-autoscale/releases/tag/v0.1.0
