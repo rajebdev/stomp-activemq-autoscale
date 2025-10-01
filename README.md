@@ -62,6 +62,43 @@ async fn handle_notifications(message: String) -> anyhow::Result<()> {
 }
 ```
 
+### Graceful Shutdown
+
+The library provides graceful shutdown functionality through a separate `StompListenerHandle` module:
+
+```rust
+use stomp_activemq_autoscale::{
+    stomp_listener::StompListener,
+    stomp_listener_handle::StompListenerHandle,
+};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = Config::load("config.yaml")?;
+    
+    let listener = StompListener::new(config)
+        .add_queue("orders", handle_orders)
+        .add_topic("events", handle_events);
+
+    // Start with shutdown handle for graceful shutdown control
+    let shutdown_handle: StompListenerHandle = listener.run_with_shutdown_handle();
+
+    // Your application logic here...
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
+    // Gracefully shutdown and wait for all workers to complete
+    shutdown_handle.shutdown_and_wait().await?;
+    
+    println!("Service shut down gracefully");
+    Ok(())
+}
+```
+
+**Shutdown Methods:**
+- `shutdown_and_wait()` - Sends shutdown signal and waits for completion
+- `shutdown()` - Sends shutdown signal without waiting
+- Automatic signal handling (Ctrl+C, SIGTERM) is built-in
+
 ## 📚 Documentation
 
 **Complete documentation is available in the [Wiki](docs/wiki/)**

@@ -126,6 +126,29 @@ impl StompRunner {
             }
         };
 
+        // Create shutdown broadcast channel
+        let (shutdown_tx, _shutdown_rx) = broadcast::channel::<()>(1);
+        
+        self.run_with_shutdown_signal_internal(config, shutdown_tx).await
+    }
+    
+    /// Run the STOMP application with external shutdown signal
+    pub async fn run_with_shutdown_signal(mut self, shutdown_tx: broadcast::Sender<()>) -> Result<()> {
+        // Get configuration - return error if none provided and default config fails to load
+        let config = match self.config.take() {
+            Some(config) => config,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "No configuration provided. Use .with_config(config) to set configuration before calling .run()"
+                ));
+            }
+        };
+        
+        self.run_with_shutdown_signal_internal(config, shutdown_tx).await
+    }
+    
+    /// Internal method to run with shutdown signal
+    async fn run_with_shutdown_signal_internal(self, config: Config, shutdown_tx: broadcast::Sender<()>) -> Result<()> {
         // Check if monitoring is configured and enabled
         let monitoring_enabled = config.is_auto_scaling_enabled();
         let has_auto_scaling_queues = !config.get_auto_scaling_queues().is_empty();
@@ -134,23 +157,20 @@ impl StompRunner {
         
         if monitoring_enabled && (has_auto_scaling_queues || has_custom_handlers_for_auto_scaling) {
             info!("Starting with auto-scaling mode enabled");
-            self.run_with_auto_scaling(config).await
+            self.run_with_auto_scaling_with_shutdown(config, shutdown_tx).await
         } else {
             if config.is_monitoring_configured() && !monitoring_enabled {
                 info!("Monitoring disabled, using minimum worker counts");
             } else {
                 info!("Starting with static worker mode");
             }
-            self.run_static_workers(config).await
+            self.run_static_workers_with_shutdown(config, shutdown_tx).await
         }
     }
-
-    /// Run with auto-scaling enabled
-    async fn run_with_auto_scaling(self, config: Config) -> Result<()> {
+    
+    /// Run with auto-scaling enabled using external shutdown signal
+    async fn run_with_auto_scaling_with_shutdown(self, config: Config, shutdown_tx: broadcast::Sender<()>) -> Result<()> {
         debug!("Initializing auto-scaling system");
-
-        // Create shutdown broadcast channel
-        let (shutdown_tx, _shutdown_rx) = broadcast::channel::<()>(1);
 
         // Setup auto-scaling consumer pools
         let consumer_pools = self.setup_custom_consumer_pools(&config).await?;
@@ -180,8 +200,8 @@ impl StompRunner {
             shutdown_tx.subscribe(),
         )?;
 
-        // Setup graceful shutdown signal handler
-        let shutdown_handle = self.setup_shutdown_handler(shutdown_tx.clone());
+        // Setup graceful shutdown signal handler (only if using internal shutdown)
+        let shutdown_handle = self.setup_external_shutdown_handler(shutdown_tx.clone());
 
         // Start auto-scaler in background
         let autoscaler_handle = self.start_autoscaler(autoscaler).await;
@@ -191,13 +211,10 @@ impl StompRunner {
         // Wait for shutdown and cleanup
         self.shutdown_hybrid_system(shutdown_handle, autoscaler_handle, topic_tasks, subscriber_tasks).await
     }
-
-    /// Run with static workers
-    async fn run_static_workers(self, config: Config) -> Result<()> {
+    
+    /// Run with static workers using external shutdown signal
+    async fn run_static_workers_with_shutdown(self, config: Config, shutdown_tx: broadcast::Sender<()>) -> Result<()> {
         debug!("Initializing static worker system");
-        
-        // Create shutdown broadcast channel
-        let (shutdown_tx, _shutdown_rx) = broadcast::channel::<()>(1);
 
         // Create task collection for managing subscribers
         let mut subscriber_tasks = JoinSet::new();
@@ -205,9 +222,8 @@ impl StompRunner {
         // Setup static subscribers for queues and topics
         self.setup_custom_static_subscribers(&config, &shutdown_tx, &mut subscriber_tasks).await;
 
-        // Setup graceful shutdown signal handler
-        let shutdown_handle = self.setup_shutdown_handler(shutdown_tx.clone());
-
+        // Setup graceful shutdown signal handler (only if using internal shutdown)
+        let shutdown_handle = self.setup_external_shutdown_handler(shutdown_tx.clone());
 
         info!("STOMP service started successfully");
 
@@ -574,12 +590,21 @@ impl StompRunner {
             });
         }
     }
-
-    /// Setup shutdown signal handler
-    fn setup_shutdown_handler(&self, shutdown_tx: broadcast::Sender<()>) -> tokio::task::JoinHandle<()> {
+    
+    /// Setup external shutdown signal handler (waits for external signal)
+    fn setup_external_shutdown_handler(&self, shutdown_tx: broadcast::Sender<()>) -> tokio::task::JoinHandle<()> {
+        let mut shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
-            crate::utils::setup_signal_handlers().await;
-            let _ = shutdown_tx.send(()); // Notify all services to shutdown
+            // Wait for external shutdown signal or system signal
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    info!("📡 Received external shutdown signal");
+                }
+                _ = crate::utils::setup_signal_handlers() => {
+                    info!("📡 Received system shutdown signal");
+                    let _ = shutdown_tx.send(()); // Notify all services to shutdown
+                }
+            }
         })
     }
 
