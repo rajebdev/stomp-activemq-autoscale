@@ -2,8 +2,8 @@
 
 [![Crates.io](https://img.shields.io/crates/v/stomp-activemq-autoscale)](https://crates.io/crates/stomp-activemq-autoscale)
 [![Documentation](https://docs.rs/stomp-activemq-autoscale/badge.svg)](https://docs.rs/stomp-activemq-autoscale)
-[![License](https://img.shields.io/crates/l/stomp-activemq-autoscale)](https://github.com/username/stomp-activemq-autoscale/blob/main/LICENSE)
-[![Build Status](https://github.com/username/stomp-activemq-autoscale/workflows/CI/badge.svg)](https://github.com/username/stomp-activemq-autoscale/actions)
+[![License](https://img.shields.io/crates/l/stomp-activemq-autoscale)](https://github.com/rajebdev/stomp-activemq-autoscale/blob/main/LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange)](https://www.rust-lang.org)
 
 A production-ready **STOMP messaging library** implemented in Rust with intelligent **auto-scaling capabilities**, comprehensive **error handling**, and **automatic reconnection** features. Designed for both **Apache ActiveMQ Classic** and **Apache Artemis** brokers.
 
