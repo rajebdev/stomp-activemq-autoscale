@@ -1040,6 +1040,162 @@ scaling:
     }
 
     #[test]
+    fn test_config_display_debug() {
+        let config = Config {
+            service: ServiceConfig {
+                name: "test-service".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Test service".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "localhost".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
+        
+        // Test Debug formatting doesn't panic
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("test-service"));
+        assert!(debug_str.contains("ActiveMQ"));
+    }
+
+    #[test]
+    fn test_enum_variants_equality() {
+        assert_eq!(BrokerType::ActiveMQ, BrokerType::ActiveMQ);
+        assert_ne!(BrokerType::ActiveMQ, BrokerType::Artemis);
+        
+        // Test broker type debug
+        assert!(format!("{:?}", BrokerType::ActiveMQ).contains("ActiveMQ"));
+        assert!(format!("{:?}", BrokerType::Artemis).contains("Artemis"));
+    }
+
+    #[test]
+    fn test_worker_range_clone() {
+        let range = WorkerRange {
+            min: 1,
+            max: 5,
+            is_fixed: false,
+        };
+        let cloned = range.clone();
+        assert_eq!(range, cloned);
+    }
+
+    #[test]
+    fn test_config_edge_case_values() {
+        // Test zero heartbeat
+        let config = Config {
+            service: ServiceConfig {
+                name: "zero-service".to_string(),
+                version: "0.0.0".to_string(),
+                description: "".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::Artemis,
+                host: "127.0.0.1".to_string(),
+                stomp_port: 1,
+                web_port: 1,
+                username: "".to_string(),
+                password: "".to_string(),
+                heartbeat_secs: 0,
+                broker_name: "".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig {
+                enabled: false,
+                interval_secs: 0,
+                workers: HashMap::new(),
+            },
+            consumers: ConsumersConfig {
+                ack_mode: "".to_string(),
+            },
+            logging: LoggingConfig {
+                level: "".to_string(),
+                output: "".to_string(),
+            },
+            shutdown: ShutdownConfig {
+                timeout_secs: 0,
+                grace_period_secs: 0,
+            },
+            retry: RetryConfig {
+                max_attempts: 0,
+                initial_delay_ms: 0,
+                max_delay_ms: 0,
+                backoff_multiplier: 0.0,
+            },
+        };
+        
+        let (send_ms, recv_ms) = config.get_heartbeat_ms();
+        assert_eq!(send_ms, 0);
+        assert_eq!(recv_ms, 0);
+        
+        assert!(!config.is_auto_scaling_enabled());
+        assert!(config.is_monitoring_configured());
+        assert_eq!(config.get_monitoring_interval_secs(), Some(0));
+    }
+
+    #[test]
+    fn test_parse_worker_config_boundary_conditions() {
+        // Test maximum values
+        let max_range = Config::parse_worker_config("4294967295-4294967295");
+        assert!(max_range.is_ok());
+        let range = max_range.unwrap();
+        assert_eq!(range.min, 4294967295);
+        assert_eq!(range.max, 4294967295);
+        assert!(!range.is_fixed); // Range format even if min == max
+        
+        // Test zero range
+        let zero_range = Config::parse_worker_config("0-0");
+        assert!(zero_range.is_ok());
+        let range = zero_range.unwrap();
+        assert_eq!(range.min, 0);
+        assert_eq!(range.max, 0);
+        assert!(!range.is_fixed);
+        
+        // Test single zero
+        let single_zero = Config::parse_worker_config("0");
+        assert!(single_zero.is_ok());
+        let range = single_zero.unwrap();
+        assert_eq!(range.min, 0);
+        assert_eq!(range.max, 0);
+        assert!(range.is_fixed);
+    }
+
+    #[test]
+    fn test_retry_config_extreme_values() {
+        let extreme_config = RetryConfig {
+            max_attempts: i32::MAX,
+            initial_delay_ms: u64::MAX,
+            max_delay_ms: u64::MAX,
+            backoff_multiplier: f64::MAX,
+        };
+        
+        // Should handle extreme values gracefully
+        let delay = extreme_config.calculate_delay(0);
+        assert_eq!(delay.as_millis(), u64::MAX as u128);
+        
+        assert!(extreme_config.should_retry(0));
+        assert!(extreme_config.should_retry(1000)); // Large but reasonable number
+    }
+
+    #[test]
     fn test_worker_scaling_mixed_configurations() {
         let yaml_content = r#"
 service:

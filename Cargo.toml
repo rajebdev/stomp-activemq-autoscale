@@ -32,3 +32,12 @@ async-trait = "0.1"
 
 [dev-dependencies]
 tempfile = "3.0"
+mockall = "0.12"
+httpmock = "0.7"
+proptest = "1.0"
+tokio-test = "0.4"
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
+insta = "1.0"
+test-log = "0.2"
+rstest = "0.21"
