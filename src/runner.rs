@@ -9,7 +9,7 @@ use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
-use crate::service::StompService;
+use crate::service::StompClient;
 use crate::consumer_pool::{ConsumerPool, MessageHandler};
 use crate::autoscaler::AutoScaler;
 
@@ -337,10 +337,10 @@ impl StompRunner {
                 .cloned();
 
             topic_tasks.spawn(async move {
-                let mut service = StompService::new(config_clone).await?;
+                let mut client = StompClient::new(config_clone).await?;
                 
                 if let Some(handler) = custom_handler {
-                    service.receive_topic(&topic_name_clone, move |msg| handler(msg)).await
+                    client.receive_topic(&topic_name_clone, move |msg| handler(msg)).await
                 } else {
                     // No handler configured - skip this topic
                     debug!("No handler configured for topic '{}', skipping", topic_name_clone);
@@ -401,7 +401,7 @@ impl StompRunner {
                         tokio::time::sleep(tokio::time::Duration::from_millis(100 * worker_id as u64)).await;
                     }
                     
-                    let mut service = StompService::new(config_clone).await?;
+                    let mut client = StompClient::new(config_clone).await?;
                     
                     if let Some(handler) = custom_handler_clone {
                         info!("👥 Starting fixed worker {} for queue '{}' (hybrid mode)", worker_id + 1, queue_name_clone);
@@ -410,7 +410,7 @@ impl StompRunner {
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         
                         info!("🔗 Fixed worker {} connecting to queue '{}'", worker_id + 1, queue_name_clone);
-                        service.receive_queue(&queue_name_clone, move |msg| handler(msg)).await
+                        client.receive_queue(&queue_name_clone, move |msg| handler(msg)).await
                     } else {
                         // No handler configured - skip this queue
                         info!("No handler configured for fixed worker queue '{}', skipping", queue_name_clone);
@@ -527,7 +527,7 @@ impl StompRunner {
                         tokio::time::sleep(tokio::time::Duration::from_millis(100 * worker_id as u64)).await;
                     }
                     
-                    let mut service = StompService::new(config_clone).await?;
+                    let mut client = StompClient::new(config_clone).await?;
                     
                     if let Some(handler) = custom_handler_clone {
                         debug!("👥 Starting static worker {} for queue '{}' (fixed worker mode)", worker_id + 1, queue_name_clone);
@@ -536,7 +536,7 @@ impl StompRunner {
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         
                         debug!("🔗 Worker {} connecting to queue '{}'", worker_id + 1, queue_name_clone);
-                        service.receive_queue(&queue_name_clone, move |msg| handler(msg)).await
+                        client.receive_queue(&queue_name_clone, move |msg| handler(msg)).await
                     } else {
                         // No handler configured - skip this queue
                         debug!("No handler configured for queue '{}', skipping", queue_name_clone);
@@ -564,10 +564,10 @@ impl StompRunner {
                 .cloned();
 
             subscriber_tasks.spawn(async move {
-                let mut service = StompService::new(config_clone).await?;
+                let mut client = StompClient::new(config_clone).await?;
                 
                 if let Some(handler) = custom_handler {
-                    service.receive_topic(&topic_name_clone, move |msg| handler(msg)).await
+                    client.receive_topic(&topic_name_clone, move |msg| handler(msg)).await
                 } else {
                     // No handler configured - skip this topic
                     debug!("No handler configured for topic '{}', skipping", topic_name_clone);

@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::config::{Config, WorkerRange};
-use crate::service::StompService;
+use crate::service::StompClient;
 
 /// Type alias for message handler functions
 pub type MessageHandler = dyn Fn(String) -> Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
@@ -252,7 +252,7 @@ impl ConsumerPool {
         debug!("🔄 Worker '{}' starting for queue '{}'", worker_id, queue_name);
 
         // Create STOMP service for this worker
-        let mut service = StompService::new(config).await?;
+        let mut client = StompClient::new(config).await?;
 
         // Create a handler that logs worker ID
         let worker_handler = {
@@ -275,7 +275,7 @@ impl ConsumerPool {
 
         // Run the worker with shutdown handling
         tokio::select! {
-            result = service.receive_queue(&queue_name, worker_handler) => {
+            result = client.receive_queue(&queue_name, worker_handler) => {
                 match &result {
                     Ok(_) => debug!("✅ Worker '{}' completed normally", worker_id),
                     Err(e) => error!("❌ Worker '{}' failed: {}", worker_id, e),
@@ -284,7 +284,7 @@ impl ConsumerPool {
             }
             _ = shutdown_rx.recv() => {
                 debug!("🛑 Worker '{}' received shutdown signal", worker_id);
-                if let Err(e) = service.disconnect().await {
+                if let Err(e) = client.disconnect().await {
                     warn!("Worker '{}' disconnect error: {}", worker_id, e);
                 }
                 Ok(())

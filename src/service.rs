@@ -44,8 +44,8 @@ impl<'a> OptionSetter<SessionBuilder> for WithCredentials<'a> {
     }
 }
 
-/// Core STOMP service for handling message operations
-pub struct StompService {
+/// Core STOMP client for handling message operations
+pub struct StompClient {
     config: Config,
     session: Option<Session>,
     /// Tracks whether the connection is healthy
@@ -57,8 +57,8 @@ pub struct StompService {
     active_subscriptions: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
-impl StompService {
-    /// Create a new STOMP service instance
+impl StompClient {
+    /// Create a new STOMP client instance
     pub async fn new(config: Config) -> Result<Self> {
         debug!("Initializing STOMP service: {}", config.service.name);
 
@@ -163,33 +163,9 @@ impl StompService {
 
         // Add custom headers
         if !headers.is_empty() {
-            // Check if we have priority override in custom headers
-            if let Some(priority_str) = headers.get("priority") {
-                if let Ok(priority) = priority_str.parse::<u8>() {
-                    let clamped_priority = priority.clamp(0, 9);
-                    // Use broker-appropriate priority header
-                    let priority_header = match self.config.broker.broker_type {
-                        crate::config::BrokerType::ActiveMQ => "JMSPriority",
-                        crate::config::BrokerType::Artemis => "JMSPriority", // Artemis also uses JMSPriority
-                    };
-                    message_builder = message_builder.add_header(priority_header, &clamped_priority.to_string());
-                    debug!("Setting topic message priority: {} (header: {})", clamped_priority, priority_header);
-                }
-            }
-
-            // Check if we have content-type override
-            if let Some(content_type) = headers.get("content-type") {
-                message_builder = message_builder.with_content_type(content_type);
-                debug!("Setting content-type: {}", content_type);
-            }
-
-            // Add remaining custom headers
-            let processed_headers = ["priority", "content-type"];
             for (key, value) in &headers {
-                if !processed_headers.contains(&key.as_str()) {
-                    message_builder = message_builder.add_header(key, value);
-                    trace!("Adding custom topic header: {} = {}", key, value);
-                }
+                message_builder = message_builder.add_header(key, value);
+                trace!("Adding custom topic header: {} = {}", key, value);
             }
         }
 
@@ -257,75 +233,9 @@ impl StompService {
 
         // Add custom headers with enhanced functionality
         if !headers.is_empty() {
-            // Check if we have priority override in custom headers
-            if let Some(priority_str) = headers.get("priority") {
-                if let Ok(priority) = priority_str.parse::<u8>() {
-                    // Priority range: 0-9 (0 = lowest, 9 = highest)
-                    let clamped_priority = priority.clamp(0, 9);
-                    // Use broker-appropriate priority header
-                    let priority_header = match self.config.broker.broker_type {
-                        crate::config::BrokerType::ActiveMQ => "JMSPriority",
-                        crate::config::BrokerType::Artemis => "JMSPriority", // Artemis also uses JMSPriority
-                    };
-                    message_builder = message_builder.add_header(priority_header, &clamped_priority.to_string());
-                    debug!("Setting message priority: {} (header: {})", clamped_priority, priority_header);
-                }
-            }
-
-            // Check for persistent/non-persistent delivery mode
-            if let Some(persistent_str) = headers.get("persistent") {
-                let delivery_header = match self.config.broker.broker_type {
-                    crate::config::BrokerType::ActiveMQ => "JMSDeliveryMode",
-                    crate::config::BrokerType::Artemis => "JMSDeliveryMode", // Artemis also uses JMSDeliveryMode
-                };
-                
-                match persistent_str.to_lowercase().as_str() {
-                    "true" | "1" | "yes" => {
-                        // Persistent delivery (messages survive broker restart)
-                        // Use JMSDeliveryMode: 2 = PERSISTENT, 1 = NON_PERSISTENT
-                        message_builder = message_builder.add_header(delivery_header, "2");
-                        debug!("Setting persistent delivery mode (header: {})", delivery_header);
-                    }
-                    "false" | "0" | "no" => {
-                        // Non-persistent delivery (faster but messages lost on broker restart)
-                        message_builder = message_builder.add_header(delivery_header, "1");
-                        debug!("Setting non-persistent delivery mode (header: {})", delivery_header);
-                    }
-                    _ => {
-                        // Invalid value, default to persistent for safety
-                        message_builder = message_builder.add_header(delivery_header, "2");
-                        warn!("Invalid persistent value '{}', defaulting to persistent (header: {})", persistent_str, delivery_header);
-                    }
-                }
-            }
-
-            // Check for TTL (Time-To-Live)
-            if let Some(ttl_str) = headers.get("ttl") {
-                if let Ok(ttl_ms) = ttl_str.parse::<u64>() {
-                    // Use broker-appropriate expiration header
-                    let expiration_header = match self.config.broker.broker_type {
-                        crate::config::BrokerType::ActiveMQ => "JMSExpiration",
-                        crate::config::BrokerType::Artemis => "JMSExpiration", // Artemis also uses JMSExpiration
-                    };
-                    let expiry_time = chrono::Utc::now().timestamp_millis() as u64 + ttl_ms;
-                    message_builder = message_builder.add_header(expiration_header, &expiry_time.to_string());
-                    debug!("Setting message TTL: {}ms (expires at: {}, header: {})", ttl_ms, expiry_time, expiration_header);
-                }
-            }
-
-            // Check if we have content-type override
-            if let Some(content_type) = headers.get("content-type") {
-                message_builder = message_builder.with_content_type(content_type);
-                debug!("Setting content-type: {}", content_type);
-            }
-
-            // Add remaining custom headers (excluding ones we already processed)
-            let processed_headers = ["priority", "persistent", "ttl", "content-type"];
             for (key, value) in &headers {
-                if !processed_headers.contains(&key.as_str()) {
-                    message_builder = message_builder.add_header(key, value);
-                    trace!("Adding custom header: {} = {}", key, value);
-                }
+                message_builder = message_builder.add_header(key, value);
+                trace!("Adding custom header: {} = {}", key, value);
             }
         }
 
@@ -893,7 +803,7 @@ mod tests {
 
         for error in temp_errors {
             assert!(
-                StompService::is_temporary_error(&error),
+                StompClient::is_temporary_error(&error),
                 "Should be temporary: {}",
                 error
             );
@@ -908,7 +818,7 @@ mod tests {
 
         for error in non_temp_errors {
             assert!(
-                !StompService::is_temporary_error(&error),
+                !StompClient::is_temporary_error(&error),
                 "Should not be temporary: {}",
                 error
             );
@@ -970,14 +880,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stomp_service_creation() {
+    async fn test_stomp_client_creation() {
         let config = create_test_config();
-        let service = StompService::new(config).await;
-        assert!(service.is_ok());
+        let client = StompClient::new(config).await;
+        assert!(client.is_ok());
 
-        let service = service.unwrap();
-        assert!(!service.is_connected());
-        assert!(!service.is_healthy());
+        let client = client.unwrap();
+        assert!(!client.is_connected());
+        assert!(!client.is_healthy());
     }
 
     fn create_test_config() -> Config {
@@ -1071,15 +981,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_artemis_stomp_service_creation() {
+    async fn test_artemis_stomp_client_creation() {
         let config = create_artemis_test_config();
-        let service = StompService::new(config).await;
-        assert!(service.is_ok());
+        let client = StompClient::new(config).await;
+        assert!(client.is_ok());
 
-        let service = service.unwrap();
-        assert!(!service.is_connected());
-        assert!(!service.is_healthy());
-        assert_eq!(service.config.broker.broker_type, crate::config::BrokerType::Artemis);
-        assert_eq!(service.config.broker.broker_name, "broker");
+        let client = client.unwrap();
+        assert!(!client.is_connected());
+        assert!(!client.is_healthy());
+        assert_eq!(client.config.broker.broker_type, crate::config::BrokerType::Artemis);
+        assert_eq!(client.config.broker.broker_name, "broker");
     }
 }

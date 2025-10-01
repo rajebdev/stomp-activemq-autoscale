@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crate::config::Config;
-use crate::service::StompService;
+use crate::service::StompClient;
 use tracing::{debug, error, info, warn};
 use tokio::signal;
 use tokio::time::{sleep, Duration};
@@ -76,7 +76,7 @@ pub async fn send_test_messages(config: &Config) {
     debug!("📤 Sending test messages...");
 
     // Create STOMP service for sending messages
-    if let Ok(mut stomp_service) = StompService::new(config.clone()).await {
+    if let Ok(mut stomp_service) = StompClient::new(config.clone()).await {
         // Send to topics
         let mut topic_headers = HashMap::new();
         topic_headers.insert("content-type".to_string(), "text/plain".to_string());
