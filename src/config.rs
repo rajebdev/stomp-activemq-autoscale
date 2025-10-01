@@ -334,7 +334,15 @@ impl Config {
         self.destinations
             .queues
             .get(queue_config_key)
-            .map(|name| name.clone())
+            .map(|path| {
+                // Extract queue name from pathf like "/queue/demo" -> "demo"
+                if path.starts_with("/queue/") {
+                    path.strip_prefix("/queue/").unwrap_or(path).to_string()
+                } else {
+                    // Fallback to full path if it doesn't follow expected format
+                    path.clone()
+                }
+            })
     }
 
     /// Get mapping of config keys to queue names for all configured queues

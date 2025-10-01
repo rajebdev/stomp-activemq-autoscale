@@ -48,7 +48,8 @@ async fn main() -> Result<()> {
     info!("🚀 Starting STOMP Basic Example Application");
     
     // Load configuration from parent directory
-    let config = Config::load("config.yaml")?;
+    let config = Config::load("config.yaml")
+        .or_else(|_| Config::load("../../config.yaml"))?;
     
     // Display startup information
     info!("📋 Service: {} v{}", config.service.name, config.service.version);

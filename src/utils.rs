@@ -41,11 +41,17 @@ pub async fn setup_signal_handlers() {
 pub fn build_stomp_destination(broker_type: &BrokerType, dest_type: &str, name: &str) -> String {
     match broker_type {
         BrokerType::ActiveMQ => {
-            format!("/{}/{}", dest_type, name)
+            if name.starts_with("/queue/") || name.starts_with("/topic/") {
+                name.to_string()
+            } else {
+                format!("/{}/{}", dest_type, name)
+            }
         }
         BrokerType::Artemis => {
-            // Artemis uses logical address names - the broker handles routing internally
-            name.to_string()
+            name.strip_prefix("/queue/")
+                .or_else(|| name.strip_prefix("/topic/"))
+                .unwrap_or(name)
+                .to_string()
         }
     }
 }
