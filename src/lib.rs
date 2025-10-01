@@ -1,9 +1,14 @@
+// Public API - hanya 3 ini yang bisa diakses user
 pub mod config;
-pub mod client;
-pub mod broker_monitor;
-pub mod monitor;
-pub mod consumer_pool;
-pub mod scaling;
-pub mod autoscaler;
-pub mod runner;
-pub mod utils;
+pub mod stomp_producer;
+pub mod stomp_listener;
+
+// Internal modules - tidak bisa diakses dari luar
+mod client;
+mod broker_monitor;
+mod monitor;
+mod consumer_pool;
+mod scaling;
+mod autoscaler;
+mod runner;
+mod utils;

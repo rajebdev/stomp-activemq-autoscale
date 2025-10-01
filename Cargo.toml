@@ -7,10 +7,6 @@ edition = "2021"
 name = "stomp_activemq_autoscale"
 path = "src/lib.rs"
 
-[[bin]]
-name = "stomp_activemq_autoscale"
-path = "src/main.rs"
-
 [dependencies]
 stomp = { git = "https://github.com/rajebdev/stomp-rs", branch = "master" }
 tokio = { version = "1.32", features = ["full", "signal"] }
