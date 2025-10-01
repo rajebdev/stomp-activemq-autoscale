@@ -140,12 +140,12 @@ broker:
 
 destinations:
   queues:
-    orders: "/queue/orders"
-    priority_orders: "/queue/priority.orders"
-    payments: "/queue/payments"
+    orders: "orders"
+    priority_orders: "priority.orders"
+    payments: "payments"
   topics:
-    notifications: "/topic/notifications"
-    events: "/topic/events"
+    notifications: "notifications"
+    events: "events"
 
 scaling:
   enabled: true

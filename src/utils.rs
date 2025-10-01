@@ -1,5 +1,6 @@
 use tracing::{error, info};
 use tokio::signal;
+use crate::config::BrokerType;
 
 /// Setup signal handlers for graceful shutdown
 pub async fn setup_signal_handlers() {
@@ -34,9 +35,25 @@ pub async fn setup_signal_handlers() {
     }
 }
 
-/// Helper function to normalize destination names by stripping STOMP prefixes
-/// This is used for Artemis compatibility where logical address names are preferred
+/// Build STOMP destination path with appropriate prefix based on broker type and destination type
+/// For ActiveMQ: Uses full STOMP paths (/queue/name, /topic/name)
+/// For Artemis: Uses logical address names (name) - prefixes are handled internally
+pub fn build_stomp_destination(broker_type: &BrokerType, dest_type: &str, name: &str) -> String {
+    match broker_type {
+        BrokerType::ActiveMQ => {
+            format!("/{}/{}", dest_type, name)
+        }
+        BrokerType::Artemis => {
+            // Artemis uses logical address names - the broker handles routing internally
+            name.to_string()
+        }
+    }
+}
+
+/// Helper function to normalize destination names - now mainly validates input
+/// Since we're moving away from prefixed configs, this primarily ensures clean names
 pub fn normalize_destination_name(destination: &str) -> &str {
+    // Legacy compatibility: still strip prefixes if they exist (for migration)
     destination
         .strip_prefix("/queue/")
         .or_else(|| destination.strip_prefix("/topic/"))
@@ -64,12 +81,29 @@ mod tests {
     use quickcheck::quickcheck;
 
     #[test]
+    fn test_build_stomp_destination() {
+        // Test ActiveMQ - should use full STOMP paths
+        assert_eq!(build_stomp_destination(&BrokerType::ActiveMQ, "queue", "demo"), "/queue/demo");
+        assert_eq!(build_stomp_destination(&BrokerType::ActiveMQ, "topic", "notifications"), "/topic/notifications");
+        assert_eq!(build_stomp_destination(&BrokerType::ActiveMQ, "queue", "api.requests"), "/queue/api.requests");
+        
+        // Test Artemis - should use logical address names
+        assert_eq!(build_stomp_destination(&BrokerType::Artemis, "queue", "demo"), "demo");
+        assert_eq!(build_stomp_destination(&BrokerType::Artemis, "topic", "notifications"), "notifications");
+        assert_eq!(build_stomp_destination(&BrokerType::Artemis, "queue", "api.requests"), "api.requests");
+        
+        // Test with special characters and complex names
+        assert_eq!(build_stomp_destination(&BrokerType::ActiveMQ, "queue", "test.queue-name_123"), "/queue/test.queue-name_123");
+        assert_eq!(build_stomp_destination(&BrokerType::Artemis, "topic", "test.topic-name_456"), "test.topic-name_456");
+    }
+
+    #[test]
     fn test_normalize_destination_name() {
-        // Test queue prefix stripping
+        // Test queue prefix stripping (legacy compatibility)
         assert_eq!(normalize_destination_name("/queue/demo"), "demo");
         assert_eq!(normalize_destination_name("/queue/orders"), "orders");
         
-        // Test topic prefix stripping
+        // Test topic prefix stripping (legacy compatibility)
         assert_eq!(normalize_destination_name("/topic/events"), "events");
         assert_eq!(normalize_destination_name("/topic/alerts"), "alerts");
         

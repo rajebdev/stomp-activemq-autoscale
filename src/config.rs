@@ -327,31 +327,23 @@ impl Config {
     }
 
 
-    /// Get the actual ActiveMQ queue name from config key
-    /// Converts from destinations.queues.key path to just the queue name
-    /// Example: "/queue/demo" -> "demo", "/queue/api.requests" -> "api.requests"
-    pub fn get_activemq_queue_name(&self, queue_config_key: &str) -> Option<String> {
+    /// Get the queue name from config key
+    /// Since we now store bare names in config, this simply returns the configured name
+    /// Example: config stores "demo", returns "demo"
+    pub fn get_queue_name(&self, queue_config_key: &str) -> Option<String> {
         self.destinations
             .queues
             .get(queue_config_key)
-            .map(|path| {
-                // Extract queue name from path like "/queue/demo" -> "demo"
-                if path.starts_with("/queue/") {
-                    path.strip_prefix("/queue/").unwrap_or(path).to_string()
-                } else {
-                    // Fallback to full path if it doesn't follow expected format
-                    path.clone()
-                }
-            })
+            .map(|name| name.clone())
     }
 
-    /// Get mapping of config keys to ActiveMQ queue names for all configured queues
-    pub fn get_queue_key_to_activemq_name_mapping(&self) -> std::collections::HashMap<String, String> {
+    /// Get mapping of config keys to queue names for all configured queues
+    pub fn get_queue_key_to_name_mapping(&self) -> std::collections::HashMap<String, String> {
         let mut mapping = std::collections::HashMap::new();
         
-        for (config_key, _queue_path) in &self.destinations.queues {
-            if let Some(activemq_name) = self.get_activemq_queue_name(config_key) {
-                mapping.insert(config_key.clone(), activemq_name);
+        for (config_key, _queue_name) in &self.destinations.queues {
+            if let Some(queue_name) = self.get_queue_name(config_key) {
+                mapping.insert(config_key.clone(), queue_name);
             }
         }
         
@@ -384,9 +376,9 @@ broker:
 
 destinations:
   queues:
-    test: "/queue/test"
+    test: "test"
   topics:
-    notifications: "/topic/notifications"
+    notifications: "notifications"
 
 scaling:
   enabled: true
@@ -625,11 +617,11 @@ broker:
 
 destinations:
   queues:
-    queue1: "/queue/q1"
-    queue2: "/queue/q2"
+    queue1: "q1"
+    queue2: "q2"
   topics:
-    topic1: "/topic/t1"
-    topic2: "/topic/t2"
+    topic1: "t1"
+    topic2: "t2"
 
 scaling:
   enabled: true
@@ -640,7 +632,7 @@ scaling:
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();
 
         // Test queue operations
-        assert_eq!(config.get_queue_config("queue1"), Some(&"/queue/q1".to_string()));
+        assert_eq!(config.get_queue_config("queue1"), Some(&"q1".to_string()));
         assert_eq!(config.get_queue_config("nonexistent"), None);
         
         let queue_names = config.get_all_queue_names();
@@ -649,7 +641,7 @@ scaling:
         assert!(queue_names.contains(&"queue2".to_string()));
 
         // Test topic operations
-        assert_eq!(config.get_topic_config("topic1"), Some(&"/topic/t1".to_string()));
+        assert_eq!(config.get_topic_config("topic1"), Some(&"t1".to_string()));
         assert_eq!(config.get_topic_config("nonexistent"), None);
         
         let topic_names = config.get_all_topic_names();
@@ -696,7 +688,7 @@ scaling:
     }
 
     #[test]
-    fn test_activemq_queue_name_extraction() {
+    fn test_queue_name_extraction() {
         let yaml_content = r#"
 service:
   name: "test-service"
@@ -715,9 +707,9 @@ broker:
 
 destinations:
   queues:
-    default: "/queue/demo"
-    api_requests: "/queue/api.requests"
-    errors: "/queue/errors"
+    default: "demo"
+    api_requests: "api.requests"
+    errors: "errors"
   topics: {}
 
 scaling:
@@ -746,13 +738,13 @@ retry:
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();
         
         // Test individual queue name extraction
-        assert_eq!(config.get_activemq_queue_name("default"), Some("demo".to_string()));
-        assert_eq!(config.get_activemq_queue_name("api_requests"), Some("api.requests".to_string()));
-        assert_eq!(config.get_activemq_queue_name("errors"), Some("errors".to_string()));
-        assert_eq!(config.get_activemq_queue_name("nonexistent"), None);
+        assert_eq!(config.get_queue_name("default"), Some("demo".to_string()));
+        assert_eq!(config.get_queue_name("api_requests"), Some("api.requests".to_string()));
+        assert_eq!(config.get_queue_name("errors"), Some("errors".to_string()));
+        assert_eq!(config.get_queue_name("nonexistent"), None);
         
         // Test mapping function
-        let mapping = config.get_queue_key_to_activemq_name_mapping();
+        let mapping = config.get_queue_key_to_name_mapping();
         assert_eq!(mapping.len(), 3);
         assert_eq!(mapping.get("default"), Some(&"demo".to_string()));
         assert_eq!(mapping.get("api_requests"), Some(&"api.requests".to_string()));
@@ -779,7 +771,7 @@ broker:
 
 destinations:
   queues:
-    test_queue: "/queue/test"
+    test_queue: "test"
   topics: {}
 
 scaling:
@@ -847,7 +839,7 @@ broker:
 
 destinations:
   queues:
-    test_queue: "/queue/test"
+    test_queue: "test"
   topics: {}
 
 scaling:
@@ -985,7 +977,7 @@ scaling:
         assert!(config.get_queue_worker_range("nonexistent").is_none());
 
         // Test empty activemq queue name mapping
-        let mapping = config.get_queue_key_to_activemq_name_mapping();
+        let mapping = config.get_queue_key_to_name_mapping();
         assert!(mapping.is_empty());
     }
 
@@ -1008,11 +1000,11 @@ broker:
 
 destinations:
   queues:
-    simple: "/queue/simple"
-    complex: "/queue/complex.queue.name"
+    simple: "simple"
+    complex: "complex.queue.name"
     unusual: "unusual_format"
-    empty_name: "/queue/"
-    deep_path: "/queue/app/module/queue"
+    empty_name: ""
+    deep_path: "app/module/queue"
   topics: {}
 
 scaling:
@@ -1024,15 +1016,15 @@ scaling:
         let config: Config = serde_yaml::from_str(yaml_content).unwrap();
 
         // Test various queue name extraction patterns
-        assert_eq!(config.get_activemq_queue_name("simple"), Some("simple".to_string()));
-        assert_eq!(config.get_activemq_queue_name("complex"), Some("complex.queue.name".to_string()));
-        assert_eq!(config.get_activemq_queue_name("unusual"), Some("unusual_format".to_string()));
-        assert_eq!(config.get_activemq_queue_name("empty_name"), Some("".to_string()));
-        assert_eq!(config.get_activemq_queue_name("deep_path"), Some("app/module/queue".to_string()));
-        assert_eq!(config.get_activemq_queue_name("nonexistent"), None);
+        assert_eq!(config.get_queue_name("simple"), Some("simple".to_string()));
+        assert_eq!(config.get_queue_name("complex"), Some("complex.queue.name".to_string()));
+        assert_eq!(config.get_queue_name("unusual"), Some("unusual_format".to_string()));
+        assert_eq!(config.get_queue_name("empty_name"), Some("".to_string()));
+        assert_eq!(config.get_queue_name("deep_path"), Some("app/module/queue".to_string()));
+        assert_eq!(config.get_queue_name("nonexistent"), None);
 
         // Test mapping with various formats
-        let mapping = config.get_queue_key_to_activemq_name_mapping();
+        let mapping = config.get_queue_key_to_name_mapping();
         assert_eq!(mapping.len(), 5);
         assert_eq!(mapping.get("simple"), Some(&"simple".to_string()));
         assert_eq!(mapping.get("complex"), Some(&"complex.queue.name".to_string()));
@@ -1214,7 +1206,7 @@ broker:
 
 destinations:
   queues:
-    test_queue: "/queue/test"
+    test_queue: "test"
   topics: {}
 
 scaling:

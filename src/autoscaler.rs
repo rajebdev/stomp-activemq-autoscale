@@ -151,7 +151,7 @@ impl AutoScaler {
         debug!("📋 Monitoring {} queues: {:?}", queue_config_keys.len(), queue_config_keys);
 
         // Get mapping from config keys to actual ActiveMQ queue names
-        let queue_name_mapping = self.config.get_queue_key_to_activemq_name_mapping();
+        let queue_name_mapping = self.config.get_queue_key_to_name_mapping();
         
         // Build list of actual ActiveMQ queue names for API calls
         let mut activemq_queue_names = Vec::new();

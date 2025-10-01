@@ -22,13 +22,13 @@ broker:
 destinations:
   # Queue configurations - competing consumers (load balancing)
   queues:
-    default: "/queue/demo"             # Default queue for general messages
-    api_requests: "/queue/api.requests" # API request handling queue
-    errorsx: "/queue/errorsx"            # Error handling queue
+    default: "demo"             # Default queue for general messages
+    api_requests: "api.requests" # API request handling queue
+    errorsx: "errorsx"            # Error handling queue
   
   # Topic configurations - broadcast to all subscribers
   topics:
-    notifications: "/topic/notifications"            # System notifications topic
+    notifications: "notifications"            # System notifications topic
 
 # Auto-scaling configuration
 scaling:

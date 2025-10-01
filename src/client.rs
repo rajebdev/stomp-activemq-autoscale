@@ -16,7 +16,7 @@ use stomp::session_builder::SessionBuilder;
 use stomp::subscription::{AckMode, AckOrNack};
 
 use crate::config::Config;
-use crate::utils::{normalize_destination_name};
+use crate::utils::{normalize_destination_name, build_stomp_destination};
 
 // Option setters for the session builder (following reference implementation)
 struct WithHeader(Header);
@@ -129,25 +129,22 @@ impl StompClient {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("No active STOMP session"))?;
 
-        // Build destination path - try config first, then fallback to direct path
-        let destination = if let Some(topic_path) = self.config.get_topic_config(topic_name) {
-            topic_path.clone()
-        } else if topic_name.starts_with("/topic/") {
-            topic_name.to_string()
+        // Get the topic name from config, or use the provided name directly
+        let topic_name_clean = if let Some(topic_config_name) = self.config.get_topic_config(topic_name) {
+            topic_config_name.clone()
         } else {
-            format!("/topic/{}", topic_name)
+            // Remove any legacy prefixes and use the clean name
+            normalize_destination_name(topic_name).to_string()
         };
 
-        debug!("Sending message to topic: {}", destination);
+        debug!("Sending message to topic: {}", topic_name_clean);
 
-        // Normalize destination for Artemis to use logical address names
-        let destination_for_stomp = match self.config.broker.broker_type {
-            crate::config::BrokerType::ActiveMQ => destination.clone(),
-            crate::config::BrokerType::Artemis => {
-                // Strip STOMP prefix for Artemis to use logical address name
-                normalize_destination_name(&destination).to_string()
-            },
-        };
+        // Build broker-appropriate destination path
+        let destination_for_stomp = build_stomp_destination(
+            &self.config.broker.broker_type, 
+            "topic", 
+            &topic_name_clean
+        );
         
         debug!("Using STOMP destination: {}", destination_for_stomp);
 
@@ -172,11 +169,11 @@ impl StompClient {
         // Send message and handle result with match
         match message_builder.send().await {
             Ok(_) => {
-                debug!("Message sent successfully to topic: {}", destination);
+                debug!("Message sent successfully to topic: {}", topic_name_clean);
                 Ok(())
             }
             Err(e) => {
-                error!("Failed to send message to topic {}: {}", destination, e);
+                error!("Failed to send message to topic {}: {}", topic_name_clean, e);
                 Err(anyhow::anyhow!("Failed to send message to topic: {}", e))
             }
         }
@@ -199,25 +196,22 @@ impl StompClient {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("No active STOMP session"))?;
 
-        // Build destination path - try config first, then fallback to direct path
-        let destination = if let Some(queue_path) = self.config.get_queue_config(queue_name) {
-            queue_path.clone()
-        } else if queue_name.starts_with("/queue/") {
-            queue_name.to_string()
+        // Get the queue name from config, or use the provided name directly
+        let queue_name_clean = if let Some(queue_config_name) = self.config.get_queue_config(queue_name) {
+            queue_config_name.clone()
         } else {
-            format!("/queue/{}", queue_name)
+            // Remove any legacy prefixes and use the clean name
+            normalize_destination_name(queue_name).to_string()
         };
 
-        debug!("Sending message to queue: {}", destination);
+        debug!("Sending message to queue: {}", queue_name_clean);
 
-        // Normalize destination for Artemis to use logical address names
-        let destination_for_stomp = match self.config.broker.broker_type {
-            crate::config::BrokerType::ActiveMQ => destination.clone(),
-            crate::config::BrokerType::Artemis => {
-                // Strip STOMP prefix for Artemis to use logical address name
-                normalize_destination_name(&destination).to_string()
-            },
-        };
+        // Build broker-appropriate destination path
+        let destination_for_stomp = build_stomp_destination(
+            &self.config.broker.broker_type, 
+            "queue", 
+            &queue_name_clean
+        );
         
         debug!("Using STOMP destination: {}", destination_for_stomp);
 
@@ -244,11 +238,11 @@ impl StompClient {
         // Send message and handle result with match
         match message_builder.send().await {
             Ok(_) => {
-                debug!("Message sent successfully to queue: {}", destination);
+                debug!("Message sent successfully to queue: {}", queue_name_clean);
                 Ok(())
             }
             Err(e) => {
-                error!("Failed to send message to queue {}: {}", destination, e);
+                error!("Failed to send message to queue {}: {}", queue_name_clean, e);
                 Err(anyhow::anyhow!("Failed to send message to queue: {}", e))
             }
         }
@@ -263,16 +257,15 @@ impl StompClient {
             + Sync
             + 'static,
     {
-        // Try to get topic configuration, fallback to direct path
-        let topic_path = if let Some(topic_path_config) = self.config.get_topic_config(topic_name) {
-            topic_path_config.clone()
-        } else if topic_name.starts_with("/topic/") {
-            topic_name.to_string()
+        // Get the topic name from config, or use the provided name directly
+        let topic_name_clean = if let Some(topic_config_name) = self.config.get_topic_config(topic_name) {
+            topic_config_name.clone()
         } else {
-            format!("/topic/{}", topic_name)
+            // Remove any legacy prefixes and use the clean name
+            normalize_destination_name(topic_name).to_string()
         };
 
-        debug!("Starting topic worker for: {}", topic_path);
+        debug!("Starting topic worker for: {}", topic_name_clean);
 
         // Main reconnection loop
         loop {
@@ -280,10 +273,10 @@ impl StompClient {
             if !self.is_healthy() {
                 match self.reconnect().await {
                     Ok(()) => {
-                        debug!("Successfully connected/reconnected to topic: {}", topic_path);
+                        debug!("Successfully connected/reconnected to topic: {}", topic_name_clean);
                     }
                     Err(e) => {
-                        error!("Failed to connect/reconnect to topic {}: {}", topic_path, e);
+                        error!("Failed to connect/reconnect to topic {}: {}", topic_name_clean, e);
                         return Err(e);
                     }
                 }
@@ -302,8 +295,8 @@ impl StompClient {
             // Add this destination to active subscriptions for reconnection
             {
                 let mut subs = self.active_subscriptions.lock().unwrap();
-                if !subs.contains(&topic_path) {
-                    subs.push(topic_path.clone());
+                if !subs.contains(&topic_name_clean) {
+                    subs.push(topic_name_clean.clone());
                 }
             }
 
@@ -315,14 +308,12 @@ impl StompClient {
                     SessionEvent::Connected => {
                         debug!("Connected to STOMP broker for topic subscription");
 
-                        // Normalize destination for Artemis to use logical address names
-                        let destination_for_stomp = match self.config.broker.broker_type {
-                            crate::config::BrokerType::ActiveMQ => topic_path.clone(),
-                            crate::config::BrokerType::Artemis => {
-                                // Strip STOMP prefix for Artemis to use logical address name
-                                normalize_destination_name(&topic_path).to_string()
-                            },
-                        };
+                        // Build broker-appropriate destination path
+                        let destination_for_stomp = build_stomp_destination(
+                            &self.config.broker.broker_type,
+                            "topic",
+                            &topic_name_clean
+                        );
 
                         let mut session_builder = session
                             .subscription(&destination_for_stomp)
@@ -337,7 +328,7 @@ impl StompClient {
                             .start()
                             .await?;
 
-                        info!("Subscribed to topic: {} (ID: {})", topic_path, subscription_id);
+                        info!("Subscribed to topic: {} (ID: {})", topic_name_clean, subscription_id);
                         connected = true;
                     }
 
@@ -399,14 +390,14 @@ impl StompClient {
                     }
 
                     SessionEvent::ErrorFrame(frame) => {
-                        error!("[{}] Error frame received: {:?}", topic_path, frame);
+                        error!("[{}] Error frame received: {:?}", topic_name_clean, frame);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
                     }
 
                     SessionEvent::Disconnected(reason) => {
-                        warn!("[{}] Session disconnected: {:?}", topic_path, reason);
+                        warn!("[{}] Session disconnected: {:?}", topic_name_clean, reason);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
@@ -423,7 +414,7 @@ impl StompClient {
                 self.session = Some(session);
                 break;
             } else {
-                debug!("Connection lost for topic {}, will attempt reconnection...", topic_path);
+                debug!("Connection lost for topic {}, will attempt reconnection...", topic_name_clean);
                 // Session will be recreated on next iteration
                 sleep(Duration::from_millis(1000)).await; // Brief pause before reconnecting
             }
@@ -441,16 +432,15 @@ impl StompClient {
             + Sync
             + 'static,
     {
-        // Try to get queue configuration, fallback to direct path
-        let queue_path = if let Some(queue_path_config) = self.config.get_queue_config(queue_name) {
-            queue_path_config.clone()
-        } else if queue_name.starts_with("/queue/") {
-            queue_name.to_string()
+        // Get the queue name from config, or use the provided name directly
+        let queue_name_clean = if let Some(queue_config_name) = self.config.get_queue_config(queue_name) {
+            queue_config_name.clone()
         } else {
-            format!("/queue/{}", queue_name)
+            // Remove any legacy prefixes and use the clean name
+            normalize_destination_name(queue_name).to_string()
         };
 
-        debug!("Starting queue worker for: {}", queue_path);
+        debug!("Starting queue worker for: {}", queue_name_clean);
 
         // Main reconnection loop
         loop {
@@ -458,10 +448,10 @@ impl StompClient {
             if !self.is_healthy() {
                 match self.reconnect().await {
                     Ok(()) => {
-                        debug!("Successfully connected/reconnected to queue: {}", queue_path);
+                        debug!("Successfully connected/reconnected to queue: {}", queue_name_clean);
                     }
                     Err(e) => {
-                        error!("Failed to connect/reconnect to queue {}: {}", queue_path, e);
+                        error!("Failed to connect/reconnect to queue {}: {}", queue_name_clean, e);
                         return Err(e);
                     }
                 }
@@ -480,8 +470,8 @@ impl StompClient {
             // Add this destination to active subscriptions for reconnection
             {
                 let mut subs = self.active_subscriptions.lock().unwrap();
-                if !subs.contains(&queue_path) {
-                    subs.push(queue_path.clone());
+                if !subs.contains(&queue_name_clean) {
+                    subs.push(queue_name_clean.clone());
                 }
             }
 
@@ -493,14 +483,12 @@ impl StompClient {
                     SessionEvent::Connected => {
                         debug!("Connected to STOMP broker for queue subscription");
 
-                        // Normalize destination for Artemis to use logical address names
-                        let destination_for_stomp = match self.config.broker.broker_type {
-                            crate::config::BrokerType::ActiveMQ => queue_path.clone(),
-                            crate::config::BrokerType::Artemis => {
-                                // Strip STOMP prefix for Artemis to use logical address name
-                                normalize_destination_name(&queue_path).to_string()
-                            },
-                        };
+                        // Build broker-appropriate destination path
+                        let destination_for_stomp = build_stomp_destination(
+                            &self.config.broker.broker_type,
+                            "queue",
+                            &queue_name_clean
+                        );
 
                         let mut session_builder = session
                             .subscription(&destination_for_stomp)
@@ -515,7 +503,7 @@ impl StompClient {
                             .start()
                             .await?;
 
-                        info!("Subscribed to queue: {} (ID: {})", queue_path, subscription_id);
+                        info!("Subscribed to queue: {} (ID: {})", queue_name_clean, subscription_id);
                         connected = true;
                     }
 
@@ -577,14 +565,14 @@ impl StompClient {
                     }
 
                     SessionEvent::ErrorFrame(frame) => {
-                        error!("[{}] Error frame received: {:?}", queue_path, frame);
+                        error!("[{}] Error frame received: {:?}", queue_name_clean, frame);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
                     }
 
                     SessionEvent::Disconnected(reason) => {
-                        warn!("[{}] Session disconnected: {:?}", queue_path, reason);
+                        warn!("[{}] Session disconnected: {:?}", queue_name_clean, reason);
                         self.mark_unhealthy();
                         should_reconnect = true;
                         break;
@@ -601,7 +589,7 @@ impl StompClient {
                 self.session = Some(session);
                 break;
             } else {
-                debug!("Connection lost for queue {}, will attempt reconnection...", queue_path);
+                debug!("Connection lost for queue {}, will attempt reconnection...", queue_name_clean);
                 // Session will be recreated on next iteration
                 sleep(Duration::from_millis(1000)).await; // Brief pause before reconnecting
             }

@@ -99,13 +99,13 @@ mod tests {
             destinations: DestinationsConfig {
                 queues: {
                     let mut queues = HashMap::new();
-                    queues.insert("test_queue".to_string(), "/queue/test".to_string());
-                    queues.insert("order_queue".to_string(), "/queue/orders".to_string());
+                    queues.insert("test_queue".to_string(), "test".to_string());
+                    queues.insert("order_queue".to_string(), "orders".to_string());
                     queues
                 },
                 topics: {
                     let mut topics = HashMap::new();
-                    topics.insert("notifications".to_string(), "/topic/notifications".to_string());
+                    topics.insert("notifications".to_string(), "notifications".to_string());
                     topics
                 },
             },
