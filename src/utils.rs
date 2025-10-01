@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crate::config::Config;
-use crate::service::StompClient;
+use crate::client::StompClient;
 use tracing::{debug, error, info, warn};
 use tokio::signal;
 use tokio::time::{sleep, Duration};

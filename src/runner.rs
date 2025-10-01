@@ -9,7 +9,7 @@ use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
-use crate::service::StompClient;
+use crate::client::StompClient;
 use crate::consumer_pool::{ConsumerPool, MessageHandler};
 use crate::autoscaler::AutoScaler;
 

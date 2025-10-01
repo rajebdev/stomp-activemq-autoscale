@@ -1,5 +1,5 @@
 pub mod config;
-pub mod service;
+pub mod client;
 pub mod broker_monitor;
 pub mod monitor;
 pub mod consumer_pool;

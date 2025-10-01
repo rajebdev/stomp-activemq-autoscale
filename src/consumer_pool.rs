@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::config::{Config, WorkerRange};
-use crate::service::StompClient;
+use crate::client::StompClient;
 
 /// Type alias for message handler functions
 pub type MessageHandler = dyn Fn(String) -> Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
