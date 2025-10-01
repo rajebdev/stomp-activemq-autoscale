@@ -365,56 +365,6 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    fn get_test_yaml() -> &'static str {
-        r#"
-service:
-  name: "test-service"
-  version: "1.0.0"
-  description: "Test service"
-
-broker:
-  type: "activemq"
-  host: "localhost"
-  username: "admin"
-  password: "admin"
-  stomp_port: 61613
-  web_port: 8161
-  heartbeat_secs: 30
-  broker_name: "localhost"
-
-destinations:
-  queues:
-    default: "/queue/demo"
-    api_requests: "/queue/api.requests"
-  topics:
-    notifications: "/topic/notifications"
-
-scaling:
-  enabled: true
-  interval_secs: 5
-  workers:
-    default: "1-4"
-    api_requests: "2-6"
-
-consumers:
-  ack_mode: "auto"
-
-logging:
-  level: "info"
-  output: "stdout"
-
-shutdown:
-  timeout_secs: 30
-  grace_period_secs: 5
-
-retry:
-  max_attempts: 3
-  initial_delay_ms: 1000
-  max_delay_ms: 30000
-  backoff_multiplier: 2.0
-"#
-    }
-
     fn create_test_config_yaml() -> &'static str {
         r#"
 service:
