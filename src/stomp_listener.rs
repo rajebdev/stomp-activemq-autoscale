@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
-use tokio::task::JoinHandle;
 use tokio::sync::broadcast;
 use tracing::debug;
 use crate::config::Config;
@@ -57,14 +56,7 @@ impl StompListener {
     }
 
     /// Run the listener in background (non-blocking)
-    pub fn run_background(self) -> JoinHandle<Result<()>> {
-        tokio::spawn(async move {
-            self.run().await
-        })
-    }
-    
-    /// Run the listener with shutdown handle for graceful shutdown control
-    pub fn run_with_shutdown_handle(self) -> StompListenerHandle {
+    pub fn run_background(self) -> StompListenerHandle {
         debug!("🚀 Starting STOMP Listener with shutdown handle...");
         
         // Create shutdown broadcast channel
@@ -129,8 +121,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_stomp_listener_handle_creation() {
+    #[tokio::test]
+    async fn test_stomp_listener_handle_creation() {
         let config = create_test_config();
         let listener = StompListener::new(config)
             .add_queue("test_queue", |_msg| async { Ok(()) });
@@ -197,8 +189,8 @@ mod tests {
         assert!(shutdown_result.is_ok(), "Shutdown should complete within timeout");
     }
 
-    #[test]
-    fn test_stomp_listener_builder_pattern() {
+    #[tokio::test]
+    async fn test_stomp_listener_builder_pattern() {
         let config = create_test_config();
         let listener = StompListener::new(config)
             .add_queue("queue1", |_msg| async { Ok(()) })

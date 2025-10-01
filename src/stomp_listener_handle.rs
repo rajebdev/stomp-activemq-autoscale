@@ -83,8 +83,8 @@ mod tests {
         assert!(result.is_ok(), "Shutdown should complete within timeout");
     }
 
-    #[test]
-    fn test_multiple_shutdown_calls() {
+    #[tokio::test]
+    async fn test_multiple_shutdown_calls() {
         let (shutdown_tx, _shutdown_rx) = broadcast::channel::<()>(1);
         let task_handle = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;

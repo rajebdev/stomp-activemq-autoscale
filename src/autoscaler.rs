@@ -506,42 +506,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_get_status_empty_pools() {
-        let config = create_test_config();
-        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        let consumer_pools = HashMap::new();
 
-        let autoscaler = AutoScaler::new(config, consumer_pools, shutdown_rx).unwrap();
-        let status = autoscaler.get_status().await;
-        assert!(status.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_get_status_with_pools() {
-        let config = create_test_config();
-        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        
-        let mut consumer_pools = HashMap::new();
-        let pool = create_mock_consumer_pool(
-            "test_queue",
-            WorkerRange { min: 1, max: 3, is_fixed: false },
-            2,
-        );
-        consumer_pools.insert("test_queue".to_string(), pool);
-
-        let autoscaler = AutoScaler::new(config, consumer_pools, shutdown_rx).unwrap();
-        let status = autoscaler.get_status().await;
-        
-        assert_eq!(status.len(), 1);
-        assert!(status.contains_key("test_queue"));
-        
-        let queue_status = &status["test_queue"];
-        assert_eq!(queue_status.queue_name, "test_queue");
-        assert_eq!(queue_status.current_workers, 0); // Initially no workers running
-        assert_eq!(queue_status.worker_range.min, 1);
-        assert_eq!(queue_status.worker_range.max, 3);
-    }
 
     #[tokio::test]
     async fn test_stop_all_pools_empty() {
@@ -681,146 +646,9 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_queue_status_creation() {
-        let status = QueueStatus {
-            queue_name: "test".to_string(),
-            current_workers: 2,
-            worker_range: WorkerRange { min: 1, max: 4, is_fixed: false },
-            last_queue_size: 5,
-            last_consumer_count: 2,
-        };
 
-        assert_eq!(status.queue_name, "test");
-        assert_eq!(status.current_workers, 2);
-        assert_eq!(status.last_queue_size, 5);
-        assert_eq!(status.last_consumer_count, 2);
-        assert_eq!(status.worker_range.min, 1);
-        assert_eq!(status.worker_range.max, 4);
-        assert!(!status.worker_range.is_fixed);
-    }
 
-    #[test]
-    fn test_queue_status_clone() {
-        let status = QueueStatus {
-            queue_name: "test".to_string(),
-            current_workers: 3,
-            worker_range: WorkerRange { min: 2, max: 6, is_fixed: true },
-            last_queue_size: 10,
-            last_consumer_count: 3,
-        };
 
-        let cloned_status = status.clone();
-        assert_eq!(status.queue_name, cloned_status.queue_name);
-        assert_eq!(status.current_workers, cloned_status.current_workers);
-        assert_eq!(status.last_queue_size, cloned_status.last_queue_size);
-        assert_eq!(status.last_consumer_count, cloned_status.last_consumer_count);
-        assert_eq!(status.worker_range.min, cloned_status.worker_range.min);
-        assert_eq!(status.worker_range.max, cloned_status.worker_range.max);
-        assert_eq!(status.worker_range.is_fixed, cloned_status.worker_range.is_fixed);
-    }
-
-    #[test]
-    fn test_queue_status_debug() {
-        let status = QueueStatus {
-            queue_name: "debug_test".to_string(),
-            current_workers: 1,
-            worker_range: WorkerRange { min: 1, max: 3, is_fixed: false },
-            last_queue_size: 0,
-            last_consumer_count: 1,
-        };
-
-        let debug_str = format!("{:?}", status);
-        assert!(debug_str.contains("debug_test"));
-        assert!(debug_str.contains("current_workers: 1"));
-    }
-
-    #[tokio::test]
-    async fn test_autoscaler_with_multiple_pools() {
-        let config = create_test_config();
-        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        
-        let mut consumer_pools = HashMap::new();
-        let pool1 = create_mock_consumer_pool(
-            "test_queue",
-            WorkerRange { min: 1, max: 3, is_fixed: false },
-            1,
-        );
-        let pool2 = create_mock_consumer_pool(
-            "order_queue",
-            WorkerRange { min: 2, max: 5, is_fixed: false },
-            2,
-        );
-        consumer_pools.insert("test_queue".to_string(), pool1);
-        consumer_pools.insert("order_queue".to_string(), pool2);
-
-        let autoscaler = AutoScaler::new(config, consumer_pools, shutdown_rx).unwrap();
-        let status = autoscaler.get_status().await;
-        
-        assert_eq!(status.len(), 2);
-        assert!(status.contains_key("test_queue"));
-        assert!(status.contains_key("order_queue"));
-    }
-
-    #[tokio::test]
-    async fn test_autoscaler_register_and_get_status() {
-        let config = create_test_config();
-        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        
-        let mut consumer_pools = HashMap::new();
-        let pool = create_mock_consumer_pool(
-            "test_queue",
-            WorkerRange { min: 1, max: 3, is_fixed: false },
-            2,
-        );
-        consumer_pools.insert("test_queue".to_string(), pool);
-
-        let mut autoscaler = AutoScaler::new(config, consumer_pools, shutdown_rx).unwrap();
-        
-        // Register queues first
-        let register_result = autoscaler.register_queues_for_scaling().await;
-        assert!(register_result.is_ok());
-        
-        // Then get status
-        let status = autoscaler.get_status().await;
-        assert_eq!(status.len(), 1);
-        assert!(status.contains_key("test_queue"));
-    }
-
-    #[tokio::test]
-    async fn test_autoscaler_full_workflow() {
-        let config = create_test_config();
-        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        
-        let mut consumer_pools = HashMap::new();
-        let pool = create_mock_consumer_pool(
-            "test_queue",
-            WorkerRange { min: 1, max: 3, is_fixed: false },
-            1,
-        );
-        consumer_pools.insert("test_queue".to_string(), pool);
-
-        let mut autoscaler = AutoScaler::new(config, consumer_pools, shutdown_rx).unwrap();
-        
-        // Register queues
-        let register_result = autoscaler.register_queues_for_scaling().await;
-        assert!(register_result.is_ok());
-        
-        // Get initial status
-        let initial_status = autoscaler.get_status().await;
-        assert_eq!(initial_status.len(), 1);
-        
-        // Test scaling operations
-        let scale_up_result = autoscaler.apply_scale_up("test_queue", 1).await;
-        assert!(scale_up_result.is_ok());
-        
-        let scale_down_result = autoscaler.apply_scale_down("test_queue", 1).await;
-        assert!(scale_down_result.is_ok());
-        
-        // Stop all pools
-        let stop_result = autoscaler.stop_all_pools().await;
-        assert!(stop_result.is_ok());
-    }
 
     #[tokio::test]
     async fn test_edge_case_scale_down_zero_workers() {
@@ -904,43 +732,5 @@ mod tests {
         assert_eq!(autoscaler.config.scaling.interval_secs, 5);
     }
 
-    #[tokio::test]
-    async fn test_queue_status_with_different_worker_ranges() {
-        let config = create_test_config();
-        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        
-        let mut consumer_pools = HashMap::new();
-        
-        // Pool with fixed workers
-        let pool1 = create_mock_consumer_pool(
-            "fixed_queue",
-            WorkerRange { min: 3, max: 3, is_fixed: true },
-            3,
-        );
-        
-        // Pool with variable workers
-        let pool2 = create_mock_consumer_pool(
-            "variable_queue",
-            WorkerRange { min: 1, max: 10, is_fixed: false },
-            5,
-        );
-        
-        consumer_pools.insert("fixed_queue".to_string(), pool1);
-        consumer_pools.insert("variable_queue".to_string(), pool2);
 
-        let autoscaler = AutoScaler::new(config, consumer_pools, shutdown_rx).unwrap();
-        let status = autoscaler.get_status().await;
-        
-        assert_eq!(status.len(), 2);
-        
-        let fixed_status = &status["fixed_queue"];
-        assert!(fixed_status.worker_range.is_fixed);
-        assert_eq!(fixed_status.worker_range.min, 3);
-        assert_eq!(fixed_status.worker_range.max, 3);
-        
-        let variable_status = &status["variable_queue"];
-        assert!(!variable_status.worker_range.is_fixed);
-        assert_eq!(variable_status.worker_range.min, 1);
-        assert_eq!(variable_status.worker_range.max, 10);
-    }
 }

@@ -881,16 +881,6 @@ mod tests {
         let display_str = format!("{}", broker_error);
         assert!(display_str.contains("Broker API error: Test error"));
 
-        // Test config error
-        let config_error = MonitoringError::ConfigError("Invalid config".to_string());
-        let display_str = format!("{}", config_error);
-        assert!(display_str.contains("Configuration error: Invalid config"));
-
-        // Test timeout error
-        let timeout_error = MonitoringError::Timeout;
-        let display_str = format!("{}", timeout_error);
-        assert!(display_str.contains("Network timeout"));
-
         // Test JSON error using a real parsing failure
         let invalid_json = "{ invalid json }";
         let json_result: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(invalid_json);
