@@ -301,15 +301,19 @@ async fn main() -> Result<()> {
 #### Sending Test Messages
 ```rust
 // Send test messages programmatically
+use stomp_activemq_autoscale::service::StompService;
+use std::collections::HashMap;
+
 async fn send_test_messages(config: &Config) -> Result<()> {
     let mut service = StompService::new(config.clone()).await?;
     
     // Send to queue
-    service.send_queue("orders", r#"{"order_id": 12345, "amount": 99.99}"#).await?;
+    service.send_queue("orders", r#"{"order_id": 12345, "amount": 99.99}"#, HashMap::new()).await?;
     
     // Send to topic with headers
-    let headers = [("priority", "high"), ("type", "alert")]
-        .iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    let mut headers = HashMap::new();
+    headers.insert("priority".to_string(), "high".to_string());
+    headers.insert("type".to_string(), "alert".to_string());
     
     service.send_topic("notifications", "System maintenance in 5 minutes", headers).await?;
     
@@ -609,6 +613,7 @@ activemq:
 - **[anyhow](https://docs.rs/anyhow/)** - Flexible error handling
 - **[serde](https://serde.rs/)** - Serialization framework with YAML support
 - **[tracing](https://docs.rs/tracing/)** - Structured application logging
+- **[async-trait](https://docs.rs/async-trait/)** - Async trait support for broker abstraction
 
 ### Networking & HTTP
 - **[reqwest](https://docs.rs/reqwest/)** - HTTP client for ActiveMQ monitoring API
@@ -636,6 +641,10 @@ uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 urlencoding = "2.1"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3.0"
 ```
 
 
@@ -652,5 +661,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🏷️ Releases
 
-- **v1.0.0** - Initial release with auto-scaling capabilities
+- **v0.1.0** - Development version with multi-broker support and auto-scaling
 - See [Releases](https://github.com/rajebdev/stomp-activemq-autoscale/releases) for changelog
