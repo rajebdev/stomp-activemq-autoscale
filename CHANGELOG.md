@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2025-01-02
+
 ### BREAKING CHANGES
 - 📁 **Module structure simplified** - removed redundant `stomp_` prefix from internal modules for cleaner imports:
   - `stomp_producer` → `producer`
@@ -115,6 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dead Letter Queue (DLQ) patterns for error handling
 - Health checks and monitoring endpoints ready
 
-[Unreleased]: https://github.com/rajebdev/stomp-activemq-autoscale/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/rajebdev/stomp-activemq-autoscale/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/rajebdev/stomp-activemq-autoscale/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/rajebdev/stomp-activemq-autoscale/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rajebdev/stomp-activemq-autoscale/releases/tag/v0.1.0

@@ -32,7 +32,7 @@ A production-ready **STOMP messaging library** implemented in Rust with intellig
 **Add to your `Cargo.toml`:**
 ```toml
 [dependencies]
-stomp-activemq-autoscale = "0.1.0"
+stomp-activemq-autoscale = "0.1.2"
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 ```
