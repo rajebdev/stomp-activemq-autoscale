@@ -1,7 +1,7 @@
 // Public API - hanya 3 ini yang bisa diakses user
 pub mod config;
-pub mod stomp_producer;
-pub mod stomp_listener;
+pub mod producer;
+pub mod listener;
 
 // Internal modules - tidak bisa diakses dari luar
 mod client;
@@ -12,4 +12,4 @@ mod scaling;
 mod autoscaler;
 mod runner;
 mod utils;
-mod stomp_listener_handle;
+mod listener_handle;

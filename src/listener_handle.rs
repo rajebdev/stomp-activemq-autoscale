@@ -98,7 +98,7 @@ mod tests {
         handle.shutdown();
         handle.shutdown();
 
-        // This should complete successfully
-        assert!(true, "Multiple shutdown calls handled gracefully");
+        // This test passes if it reaches this point without panicking
+        // Multiple shutdown calls are handled gracefully
     }
 }

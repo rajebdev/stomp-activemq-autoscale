@@ -349,7 +349,7 @@ impl Config {
     pub fn get_queue_key_to_name_mapping(&self) -> std::collections::HashMap<String, String> {
         let mut mapping = std::collections::HashMap::new();
         
-        for (config_key, _queue_name) in &self.destinations.queues {
+        for config_key in self.destinations.queues.keys() {
             if let Some(queue_name) = self.get_queue_name(config_key) {
                 mapping.insert(config_key.clone(), queue_name);
             }
@@ -920,7 +920,7 @@ shutdown:
     #[test]
     fn test_default_functions() {
         assert_eq!(default_broker_name(), "localhost");
-        assert_eq!(default_scaling_enabled(), true);
+        assert!(default_scaling_enabled());
     }
 
     #[test]

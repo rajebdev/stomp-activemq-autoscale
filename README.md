@@ -47,7 +47,7 @@ cargo add stomp-activemq-autoscale tokio anyhow
 ```rust
 use stomp_activemq_autoscale::{
     config::Config,
-    stomp_producer::StompProducer,
+    producer::StompProducer,
 };
 use anyhow::Result;
 
@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
 ```rust
 use stomp_activemq_autoscale::{
     config::Config,
-    stomp_listener::StompListener,
+    listener::StompListener,
 };
 use anyhow::Result;
 

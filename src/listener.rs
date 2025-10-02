@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 use tracing::debug;
 use crate::config::Config;
 use crate::runner::StompRunner;
-use crate::stomp_listener_handle::StompListenerHandle;
+use crate::listener_handle::StompListenerHandle;
 
 /// Type alias for message handler function
 pub type MessageHandler = Box<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
