@@ -20,7 +20,7 @@ DOCKER_LOGS_CMD = docker logs -f $(APP_NAME)-app
 DOCKER_STATS_CMD = docker stats $(APP_NAME)-app
 SONARQUBE_CMD = docker run --env-file sonar.env --rm -v .:/usr/src -w /usr/src sonarsource/sonar-scanner-cli
 
-.PHONY: build run test coverage clippy tidy version sync setup up down destroy logs stats sonar normalize
+.PHONY: build run test coverage cov-fast watch-cov clippy tidy version sync setup up down destroy logs stats sonar normalize
 
 build:
 	@$(BUILD_CMD)
@@ -33,6 +33,39 @@ test:
 
 coverage:
 	@$(COVERAGE_CMD)
+
+cov-fast:
+	@cargo llvm-cov nextest --html
+	@echo ""
+	@echo "=========================================================================================================================="
+	@echo "File                           | Function              | Line                  | Region                | Branch"
+	@echo "=========================================================================================================================="
+	@cat target/llvm-cov/html/index.html \
+	| sed 's/<\/tr>/\n/g' \
+	| grep "light-row" \
+	| while IFS= read -r line; do \
+		file=$$(echo "$$line" | grep -o '>[^<]*\.rs<' | sed 's/>//; s/<//' | head -1); \
+		if [ -z "$$file" ]; then file=$$(echo "$$line" | grep -o '>Totals<' | sed 's/>//; s/<//'); fi; \
+		allpre=$$(echo "$$line" | grep -o '<pre>[^<]*</pre>' | sed 's/<pre>//; s/<\/pre>//'); \
+		func=$$(echo "$$allpre" | sed -n '1p'); \
+		linec=$$(echo "$$allpre" | sed -n '2p'); \
+		region=$$(echo "$$allpre" | sed -n '3p'); \
+		branch=$$(echo "$$allpre" | sed -n '4p'); \
+		if [ "$$file" = "Totals" ]; then \
+			echo "--------------------------------------------------------------------------------------------------------------------------"; \
+			func=$$(echo "$$allpre" | sed -n '2p'); \
+			linec=$$(echo "$$allpre" | sed -n '3p'); \
+			region=$$(echo "$$allpre" | sed -n '4p'); \
+			branch=$$(echo "$$allpre" | sed -n '5p'); \
+		fi; \
+		if [ -n "$$file" ]; then \
+			printf "%-30s | %-21s | %-21s | %-21s | %s\n" "$$file" "$$func" "$$linec" "$$region" "$$branch"; \
+		fi; \
+	done
+	@echo "=========================================================================================================================="
+
+watch-cov:
+	@cargo watch -q -w src -w Cargo.toml -s "make -s cov-fast"
 
 clippy:
 	@$(CLIPPY_CMD)
