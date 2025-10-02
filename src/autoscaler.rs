@@ -728,7 +728,7 @@ mod tests {
         // Verify config was set correctly
         assert_eq!(autoscaler.config.broker.host, "localhost");
         assert_eq!(autoscaler.config.broker.web_port, 8161);
-        assert_eq!(autoscaler.config.scaling.enabled, true);
+        assert!(autoscaler.config.scaling.enabled);
         assert_eq!(autoscaler.config.scaling.interval_secs, 5);
     }
 

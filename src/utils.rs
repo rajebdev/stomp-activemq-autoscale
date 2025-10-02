@@ -275,14 +275,14 @@ mod tests {
         {
             // On Windows, we use ctrl_c signal
             // This is just a compilation test
-            assert!(true);
+            // No assertions needed - test passes if it compiles
         }
         
         #[cfg(unix)]
         {
             // On Unix, we use SIGTERM and SIGINT
             // This is just a compilation test  
-            assert!(true);
+            // No assertions needed - test passes if it compiles
         }
     }
 

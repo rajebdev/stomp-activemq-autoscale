@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### BREAKING CHANGES
+- 📁 **Module structure simplified** - removed redundant `stomp_` prefix from internal modules for cleaner imports:
+  - `stomp_producer` → `producer`
+  - `stomp_listener` → `listener` 
+  - `stomp_listener_handle` → `listener_handle`
+- 📦 **Import paths updated** - update your module imports accordingly:
+  ```rust
+  // Old:
+  use stomp_activemq_autoscale::{
+      stomp_producer::StompProducer,
+      stomp_listener::StompListener,
+  };
+  
+  // New:
+  use stomp_activemq_autoscale::{
+      producer::StompProducer,
+      listener::StompListener,
+  };
+  ```
+
+### Changed
+- 🏗️ **Cleaner module naming** - removed redundant `stomp_` prefixes from internal modules for better readability
+- 📚 **Updated documentation** and examples to reflect new module structure
+
 ## [0.1.1] - 2025-01-01
 
 ### Changed

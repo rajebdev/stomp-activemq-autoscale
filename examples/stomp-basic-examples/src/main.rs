@@ -2,8 +2,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use stomp_activemq_autoscale::{
     config::Config,
-    stomp_producer::StompProducer,
-    stomp_listener::StompListener,
+    producer::StompProducer,
+    listener::StompListener,
 };
 use tracing::info;
 use tokio::time::Duration;

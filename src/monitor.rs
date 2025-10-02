@@ -13,6 +13,7 @@ use crate::config::{BrokerConfig, BrokerType};
 use crate::utils::{normalize_destination_name, determine_routing_types};
 
 #[derive(Error, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum MonitoringError {
     #[error("HTTP request failed: {0}")]
     HttpError(#[from] reqwest::Error),
@@ -121,7 +122,7 @@ impl ActiveMQMonitor {
         let jolokia_response: JolokiaResponse = response
             .json()
             .await
-            .map_err(|e| MonitoringError::HttpError(e))?;
+            .map_err(MonitoringError::HttpError)?;
 
         // Check Jolokia status
         if jolokia_response.status != 200 {
@@ -326,7 +327,7 @@ impl ArtemisMonitor {
         let jolokia_response: JolokiaResponse = response
             .json()
             .await
-            .map_err(|e| MonitoringError::HttpError(e))?;
+            .map_err(MonitoringError::HttpError)?;
 
         // Check Jolokia status
         if jolokia_response.status != 200 {
