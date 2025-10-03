@@ -13,3 +13,11 @@ mod autoscaler;
 mod runner;
 mod utils;
 mod listener_handle;
+
+#[cfg(test)]
+#[ctor::ctor]
+fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init();
+}

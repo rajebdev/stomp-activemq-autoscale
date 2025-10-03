@@ -2,25 +2,25 @@ use anyhow::Result;
 use std::collections::HashMap;
 use tracing::debug;
 use crate::config::Config;
-use crate::client::StompClient;
+use crate::client::{Client, StompClient};
 
 /// StompProducer for sending messages to queues and topics
-pub struct StompProducer {
-    client: StompClient,
+pub struct StompProducer<C: Client> {
+    client: C,
 }
 
-impl StompProducer {
-    /// Create a new StompProducer with the given configuration
-    pub async fn new(config: Config) -> Result<Self> {
-        let client = StompClient::new(config).await?;
-        Ok(Self { client })
+impl<C: Client> StompProducer<C> {
+    /// Create a new StompProducer with a custom client (for testing)
+    #[cfg(test)]
+    pub fn with_client(client: C) -> Self {
+        Self { client }
     }
 
     /// Send a message to a queue with custom headers
     pub async fn send_queue_with_headers(&mut self, queue_name: &str, message: &str, headers: HashMap<String, String>) -> Result<()> {
         debug!("📤 Sending message to queue '{}' with headers: {}", queue_name, message);
         
-        // Send message to queue using existing client method with custom headers
+        // Send message to queue using client trait method with custom headers
         // The client will automatically connect if not already connected
         self.client.send_queue(queue_name, message, headers).await?;
         
@@ -32,7 +32,7 @@ impl StompProducer {
     pub async fn send_queue(&mut self, queue_name: &str, message: &str) -> Result<()> {
         debug!("📤 Sending message to queue '{}': {}", queue_name, message);
         
-        // Send message to queue using existing client method with empty headers
+        // Send message to queue using client trait method with empty headers
         // The client will automatically connect if not already connected
         let headers = HashMap::new();
         self.client.send_queue(queue_name, message, headers).await?;
@@ -45,7 +45,7 @@ impl StompProducer {
     pub async fn send_topic_with_headers(&mut self, topic_name: &str, message: &str, headers: HashMap<String, String>) -> Result<()> {
         debug!("📤 Sending message to topic '{}' with headers: {}", topic_name, message);
         
-        // Send message to topic using existing client method with custom headers
+        // Send message to topic using client trait method with custom headers
         // The client will automatically connect if not already connected
         self.client.send_topic(topic_name, message, headers).await?;
         
@@ -57,7 +57,7 @@ impl StompProducer {
     pub async fn send_topic(&mut self, topic_name: &str, message: &str) -> Result<()> {
         debug!("📤 Sending message to topic '{}': {}", topic_name, message);
         
-        // Send message to topic using existing client method with empty headers
+        // Send message to topic using client trait method with empty headers
         // The client will automatically connect if not already connected
         let headers = HashMap::new();
         self.client.send_topic(topic_name, message, headers).await?;
@@ -72,329 +72,684 @@ impl StompProducer {
     }
 }
 
+/// Implement for StompClient specifically to maintain backward compatibility
+impl StompProducer<StompClient> {
+    /// Create a new StompProducer with the given configuration
+    pub async fn new(config: Config) -> Result<Self> {
+        let client = StompClient::new(config).await?;
+        Ok(Self { client })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::*;
+    use anyhow::anyhow;
     use std::collections::HashMap;
-    use tokio::time::{timeout, Duration};
-
-    fn create_test_config() -> Config {
-        Config {
+    
+    // Import the generated MockClient from client module
+    use crate::client::MockClient;
+    
+    // === UNIT TESTS WITH MOCKS ===
+    
+    #[tokio::test]
+    async fn test_producer_with_client_constructor() {
+        let mock_client = MockClient::new();
+        let _producer = StompProducer::with_client(mock_client);
+        
+        // Should be able to create producer with mock client
+        assert!(true);
+    }
+    
+    #[tokio::test]
+    async fn test_send_queue_with_headers_success() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation
+        mock_client
+            .expect_send_queue()
+            .times(1)
+            .withf(|queue, msg, headers| {
+                queue == "test_queue" && msg == "test message" && headers.len() == 2
+            })
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let mut headers = HashMap::new();
+        headers.insert("priority".to_string(), "high".to_string());
+        headers.insert("type".to_string(), "order".to_string());
+        
+        let result = producer.send_queue_with_headers("test_queue", "test message", headers).await;
+        
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_send_queue_with_headers_failure() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation to return error
+        mock_client
+            .expect_send_queue()
+            .times(1)
+            .returning(|_, _, _| Err(anyhow!("Connection failed")));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let headers = HashMap::new();
+        let result = producer.send_queue_with_headers("test_queue", "test message", headers).await;
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Connection failed"));
+    }
+    
+    #[tokio::test]
+    async fn test_send_queue_without_headers_success() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation - should receive empty headers
+        mock_client
+            .expect_send_queue()
+            .times(1)
+            .withf(|queue, msg, headers| {
+                queue == "test_queue" && msg == "test message" && headers.is_empty()
+            })
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.send_queue("test_queue", "test message").await;
+        
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_send_topic_with_headers_success() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation
+        mock_client
+            .expect_send_topic()
+            .times(1)
+            .withf(|topic, msg, headers| {
+                topic == "notifications" && msg == "alert" && headers.len() == 1
+            })
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let mut headers = HashMap::new();
+        headers.insert("urgency".to_string(), "high".to_string());
+        
+        let result = producer.send_topic_with_headers("notifications", "alert", headers).await;
+        
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_send_topic_without_headers_success() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation - should receive empty headers
+        mock_client
+            .expect_send_topic()
+            .times(1)
+            .withf(|topic, msg, headers| {
+                topic == "notifications" && msg == "simple alert" && headers.is_empty()
+            })
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.send_topic("notifications", "simple alert").await;
+        
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_send_topic_failure() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation to return error
+        mock_client
+            .expect_send_topic()
+            .times(1)
+            .returning(|_, _, _| Err(anyhow!("Topic not found")));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.send_topic("missing_topic", "message").await;
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Topic not found"));
+    }
+    
+    #[tokio::test]
+    async fn test_disconnect_success() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation
+        mock_client
+            .expect_disconnect()
+            .times(1)
+            .returning(|| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.disconnect().await;
+        
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_disconnect_failure() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectation to return error
+        mock_client
+            .expect_disconnect()
+            .times(1)
+            .returning(|| Err(anyhow!("Disconnect failed")));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.disconnect().await;
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Disconnect failed"));
+    }
+    
+    #[tokio::test]
+    async fn test_multiple_operations_on_same_producer() {
+        let mut mock_client = MockClient::new();
+        
+        // Set up expectations for multiple operations
+        mock_client
+            .expect_send_queue()
+            .times(2)
+            .returning(|_, _, _| Ok(()));
+        
+        mock_client
+            .expect_send_topic()
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        
+        mock_client
+            .expect_disconnect()
+            .times(1)
+            .returning(|| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        // Perform multiple operations
+        let result1 = producer.send_queue("queue1", "message1").await;
+        assert!(result1.is_ok());
+        
+        let result2 = producer.send_queue("queue2", "message2").await;
+        assert!(result2.is_ok());
+        
+        let result3 = producer.send_topic("topic1", "broadcast").await;
+        assert!(result3.is_ok());
+        
+        let result4 = producer.disconnect().await;
+        assert!(result4.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_empty_message() {
+        let mut mock_client = MockClient::new();
+        
+        mock_client
+            .expect_send_queue()
+            .times(1)
+            .withf(|_, msg, _| msg.is_empty())
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.send_queue("test_queue", "").await;
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_large_message() {
+        let mut mock_client = MockClient::new();
+        let large_message = "x".repeat(1024 * 1024); // 1MB message
+        
+        mock_client
+            .expect_send_queue()
+            .times(1)
+            .withf(move |_, msg, _| msg.len() == 1024 * 1024)
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.send_queue("test_queue", &large_message).await;
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_unicode_message() {
+        let mut mock_client = MockClient::new();
+        let unicode_msg = "Hello 世界! 🌍 Здравствуй мир! مرحبا بالعالم!";
+        
+        mock_client
+            .expect_send_topic()
+            .times(1)
+            .withf(move |_, msg, _| msg.contains("世界") && msg.contains("🌍"))
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.send_topic("notifications", unicode_msg).await;
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_special_characters_in_message() {
+        let mut mock_client = MockClient::new();
+        let special_msg = "Message with \n\t\r\0 special chars";
+        
+        mock_client
+            .expect_send_queue()
+            .times(1)
+            .withf(move |_, msg, _| msg.contains("\n") && msg.contains("\t"))
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let result = producer.send_queue("test_queue", special_msg).await;
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_headers_with_special_values() {
+        let mut mock_client = MockClient::new();
+        
+        mock_client
+            .expect_send_queue()
+            .times(1)
+            .withf(|_, _, headers| {
+                headers.get("empty").unwrap().is_empty() &&
+                headers.get("spaces").unwrap() == "   " &&
+                headers.get("unicode").unwrap().contains("αβγ")
+            })
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let mut headers = HashMap::new();
+        headers.insert("empty".to_string(), "".to_string());
+        headers.insert("spaces".to_string(), "   ".to_string());
+        headers.insert("unicode".to_string(), "αβγδε".to_string());
+        headers.insert("special".to_string(), "!@#$%^&*()".to_string());
+        
+        let result = producer.send_queue_with_headers("test_queue", "test", headers).await;
+        assert!(result.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn test_empty_headers_map() {
+        let mut mock_client = MockClient::new();
+        
+        mock_client
+            .expect_send_topic()
+            .times(1)
+            .withf(|_, _, headers| headers.is_empty())
+            .returning(|_, _, _| Ok(()));
+        
+        let mut producer = StompProducer::with_client(mock_client);
+        
+        let empty_headers = HashMap::new();
+        let result = producer.send_topic_with_headers("topic", "message", empty_headers).await;
+        assert!(result.is_ok());
+    }
+    
+    // === UNIT TESTS FOR StompProducer::new (lines 77-80) ===
+    // These tests cover the creation logic without actually connecting to a broker
+    
+    #[tokio::test]
+    async fn test_producer_new_creates_client_success() {
+        // Test line 77-79: Validates that StompProducer::new properly constructs
+        // a StompClient and wraps it in the producer struct
+        // Note: StompClient::new only initializes the struct, doesn't connect yet
+        
+        use crate::config::{
+            Config, ServiceConfig, BrokerConfig, BrokerType, DestinationsConfig,
+            ScalingConfig, ConsumersConfig, LoggingConfig, ShutdownConfig, RetryConfig
+        };
+        
+        let config = Config {
             service: ServiceConfig {
-                name: "test-producer".to_string(),
+                name: "test-producer-service".to_string(),
                 version: "1.0.0".to_string(),
-                description: "Test producer service".to_string(),
+                description: "Test producer".to_string(),
             },
             broker: BrokerConfig {
                 broker_type: BrokerType::ActiveMQ,
                 host: "localhost".to_string(),
-                stomp_port: 61613,
-                web_port: 8161,
                 username: "admin".to_string(),
                 password: "admin".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
                 heartbeat_secs: 30,
                 broker_name: "localhost".to_string(),
             },
             destinations: DestinationsConfig {
-                queues: {
-                    let mut queues = HashMap::new();
-                    queues.insert("test_queue".to_string(), "test".to_string());
-                    queues.insert("order_queue".to_string(), "orders".to_string());
-                    queues
-                },
-                topics: {
-                    let mut topics = HashMap::new();
-                    topics.insert("notifications".to_string(), "notifications".to_string());
-                    topics
-                },
+                queues: HashMap::new(),
+                topics: HashMap::new(),
             },
             scaling: ScalingConfig::default(),
             consumers: ConsumersConfig::default(),
             logging: LoggingConfig::default(),
             shutdown: ShutdownConfig::default(),
             retry: RetryConfig::default(),
-        }
+        };
+        
+        // Line 78: let client = StompClient::new(config).await?;
+        // StompClient::new just creates the struct, doesn't connect
+        let result = StompProducer::new(config).await;
+        
+        // Line 79: Ok(Self { client })
+        // Should succeed because new() only initializes, doesn't connect
+        assert!(result.is_ok(), "StompProducer::new should succeed as it only initializes the client struct");
+        
+        let producer = result.unwrap();
+        // Verify the producer was created with the client
+        // This confirms line 79: Ok(Self { client }) structure
+        assert!(std::mem::size_of_val(&producer) > 0);
     }
-
-    fn create_artemis_config() -> Config {
-        let mut config = create_test_config();
-        config.broker.broker_type = BrokerType::Artemis;
-        config.broker.broker_name = "broker".to_string();
-        config
-    }
-
+    
     #[tokio::test]
-    async fn test_producer_creation() {
-        let config = create_test_config();
+    async fn test_producer_new_with_activemq_config() {
+        // Test line 77-80 with ActiveMQ broker type
+        // Validates config is properly passed through to StompClient::new
         
-        // This will fail to connect but should create the producer struct
-        let result = timeout(Duration::from_secs(1), StompProducer::new(config)).await;
+        use crate::config::{
+            Config, ServiceConfig, BrokerConfig, BrokerType, DestinationsConfig,
+            ScalingConfig, ConsumersConfig, LoggingConfig, ShutdownConfig, RetryConfig
+        };
         
-        // We expect this to timeout or fail due to no actual broker
-        // but the important part is that the creation logic is tested
-        match result {
-            Ok(Ok(_)) => {
-                // If it succeeds (unlikely without real broker), that's fine
-            }
-            Ok(Err(_)) | Err(_) => {
-                // Expected - no real broker to connect to
-            }
-        }
+        let config = Config {
+            service: ServiceConfig {
+                name: "activemq-producer".to_string(),
+                version: "1.0.0".to_string(),
+                description: "ActiveMQ producer test".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "activemq.example.com".to_string(),
+                username: "activemq-user".to_string(),
+                password: "activemq-pass".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                heartbeat_secs: 10,
+                broker_name: "activemq-broker".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::from([
+                    ("orders".to_string(), "queue.orders".to_string()),
+                    ("payments".to_string(), "queue.payments".to_string()),
+                ]),
+                topics: HashMap::from([
+                    ("notifications".to_string(), "topic.notifications".to_string()),
+                ]),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
+        
+        // Call new() - should succeed as it only initializes
+        let result = StompProducer::new(config).await;
+        assert!(result.is_ok());
     }
-
+    
     #[tokio::test]
-    async fn test_send_queue_without_headers() {
-        let config = create_test_config();
+    async fn test_producer_new_with_artemis_config() {
+        // Test line 77-80 with Artemis broker type
         
-        // Test queue sending (will fail to connect but tests the method signature)
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue("test_queue", "test message").await
-            }
-        ).await;
+        use crate::config::{
+            Config, ServiceConfig, BrokerConfig, BrokerType, DestinationsConfig,
+            ScalingConfig, ConsumersConfig, LoggingConfig, ShutdownConfig, RetryConfig
+        };
         
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
+        let config = Config {
+            service: ServiceConfig {
+                name: "artemis-producer".to_string(),
+                version: "2.0.0".to_string(),
+                description: "Artemis producer test".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::Artemis,
+                host: "artemis.example.com".to_string(),
+                username: "artemis-user".to_string(),
+                password: "artemis-pass".to_string(),
+                stomp_port: 61616,
+                web_port: 8161,
+                heartbeat_secs: 60,
+                broker_name: "artemis-broker".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
+        
+        // Call new() - should succeed as it only initializes
+        let result = StompProducer::new(config).await;
+        assert!(result.is_ok());
     }
-
+    
     #[tokio::test]
-    async fn test_send_queue_with_headers() {
-        let config = create_test_config();
+    async fn test_producer_new_return_type_structure() {
+        // Test that line 77-79 properly returns Result<StompProducer<StompClient>>
         
-        let mut headers = HashMap::new();
-        headers.insert("priority".to_string(), "high".to_string());
-        headers.insert("correlation-id".to_string(), "12345".to_string());
+        use crate::config::{
+            Config, ServiceConfig, BrokerConfig, BrokerType, DestinationsConfig,
+            ScalingConfig, ConsumersConfig, LoggingConfig, ShutdownConfig, RetryConfig
+        };
         
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue_with_headers("test_queue", "test message", headers).await
-            }
-        ).await;
+        let config = Config {
+            service: ServiceConfig {
+                name: "return-type-test".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Test return type structure".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "localhost".to_string(),
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
         
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
+        // Explicitly type the result to verify return type signature (line 77)
+        let result: Result<StompProducer<StompClient>> = StompProducer::new(config).await;
+        
+        // Should be Ok because new() only initializes (line 79: Ok(Self { client }))
+        assert!(result.is_ok());
+        
+        // Verify we can unwrap and get the producer
+        let producer = result.unwrap();
+        assert!(std::mem::size_of_val(&producer) > 0);
     }
-
+    
     #[tokio::test]
-    async fn test_send_topic_without_headers() {
-        let config = create_test_config();
+    async fn test_producer_new_with_custom_heartbeat() {
+        // Test line 78: Ensures config with different heartbeat values is passed correctly
         
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_topic("notifications", "notification message").await
-            }
-        ).await;
+        use crate::config::{
+            Config, ServiceConfig, BrokerConfig, BrokerType, DestinationsConfig,
+            ScalingConfig, ConsumersConfig, LoggingConfig, ShutdownConfig, RetryConfig
+        };
         
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
+        let config = Config {
+            service: ServiceConfig {
+                name: "heartbeat-test".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Custom heartbeat test".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "localhost".to_string(),
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                heartbeat_secs: 120, // Custom heartbeat value
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
+        
+        let result = StompProducer::new(config).await;
+        assert!(result.is_ok());
     }
-
+    
     #[tokio::test]
-    async fn test_send_topic_with_headers() {
-        let config = create_test_config();
+    async fn test_producer_new_with_retry_config() {
+        // Test line 78: Validates complex config with retry settings is properly passed
         
-        let mut headers = HashMap::new();
-        headers.insert("event-type".to_string(), "user-action".to_string());
-        headers.insert("timestamp".to_string(), "1234567890".to_string());
+        use crate::config::{
+            Config, ServiceConfig, BrokerConfig, BrokerType, DestinationsConfig,
+            ScalingConfig, ConsumersConfig, LoggingConfig, ShutdownConfig, RetryConfig
+        };
         
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_topic_with_headers("notifications", "notification message", headers).await
-            }
-        ).await;
+        let config = Config {
+            service: ServiceConfig {
+                name: "retry-test".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Retry config test".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "localhost".to_string(),
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig {
+                max_attempts: 5,
+                initial_delay_ms: 1000,
+                max_delay_ms: 10000,
+                backoff_multiplier: 2.5,
+            },
+        };
         
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
+        let result = StompProducer::new(config).await;
+        assert!(result.is_ok());
     }
-
+    
     #[tokio::test]
-    async fn test_send_with_empty_headers() {
-        let config = create_test_config();
-        let empty_headers = HashMap::new();
+    async fn test_producer_new_multiple_instances() {
+        // Test that multiple producers can be created (lines 77-80)
+        // Validates that the constructor works repeatedly
         
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue_with_headers("test_queue", "test message", empty_headers).await
-            }
-        ).await;
+        use crate::config::{
+            Config, ServiceConfig, BrokerConfig, BrokerType, DestinationsConfig,
+            ScalingConfig, ConsumersConfig, LoggingConfig, ShutdownConfig, RetryConfig
+        };
         
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
-    }
-
-    #[tokio::test]
-    async fn test_send_large_message() {
-        let config = create_test_config();
+        let config1 = Config {
+            service: ServiceConfig {
+                name: "producer-1".to_string(),
+                version: "1.0.0".to_string(),
+                description: "First producer".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "localhost".to_string(),
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
         
-        // Create a large message (1MB)
-        let large_message = "x".repeat(1024 * 1024);
+        let config2 = Config {
+            service: ServiceConfig {
+                name: "producer-2".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Second producer".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::Artemis,
+                host: "artemis-host".to_string(),
+                username: "artemis".to_string(),
+                password: "artemis".to_string(),
+                stomp_port: 61616,
+                web_port: 8161,
+                heartbeat_secs: 60,
+                broker_name: "artemis".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig::default(),
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
         
-        let result = timeout(
-            Duration::from_millis(200),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue("test_queue", &large_message).await
-            }
-        ).await;
+        // Create multiple producers
+        let result1 = StompProducer::new(config1).await;
+        let result2 = StompProducer::new(config2).await;
         
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
-    }
-
-    #[tokio::test]
-    async fn test_send_unicode_message() {
-        let config = create_test_config();
-        
-        let unicode_message = "Hello 世界! 🌍 Здравствуй мир! مرحبا بالعالم!";
-        
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue("test_queue", unicode_message).await
-            }
-        ).await;
-        
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
-    }
-
-    #[tokio::test]
-    async fn test_disconnect() {
-        let config = create_test_config();
-        
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.disconnect().await
-            }
-        ).await;
-        
-        // Disconnect should work even if never connected
-        match result {
-            Ok(Ok(())) => {
-                // Success case
-            }
-            Ok(Err(_)) | Err(_) => {
-                // May fail if client creation fails
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_producer_with_artemis_config() {
-        let config = create_artemis_config();
-        
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue("test_queue", "artemis test").await
-            }
-        ).await;
-        
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
-    }
-
-    #[tokio::test]
-    async fn test_multiple_send_operations() {
-        let config = create_test_config();
-        
-        let result = timeout(
-            Duration::from_millis(200),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                
-                // Try multiple operations
-                producer.send_queue("test_queue", "message 1").await?;
-                producer.send_queue("test_queue", "message 2").await?;
-                producer.send_topic("notifications", "notification").await?;
-                
-                Ok::<(), anyhow::Error>(())
-            }
-        ).await;
-        
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
-    }
-
-    #[tokio::test] 
-    async fn test_send_to_nonexistent_destination() {
-        let config = create_test_config();
-        
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue("nonexistent_queue", "test message").await
-            }
-        ).await;
-        
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
-    }
-
-    #[test]
-    fn test_producer_struct_debug() {
-        // Test that we can debug format producer related structures
-        let config = create_test_config();
-        let debug_str = format!("{:?}", config.service);
-        assert!(debug_str.contains("test-producer"));
-        
-        let debug_broker = format!("{:?}", config.broker);
-        assert!(debug_broker.contains("ActiveMQ"));
-    }
-
-    #[tokio::test]
-    async fn test_send_with_special_characters() {
-        let config = create_test_config();
-        
-        let special_message = "Message with \n newlines \t tabs \r carriage returns and \0 null bytes";
-        
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue("test_queue", special_message).await
-            }
-        ).await;
-        
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
-    }
-
-    #[tokio::test]
-    async fn test_headers_with_special_values() {
-        let config = create_test_config();
-        
-        let mut headers = HashMap::new();
-        headers.insert("empty".to_string(), "".to_string());
-        headers.insert("spaces".to_string(), "   ".to_string());
-        headers.insert("special-chars".to_string(), "!@#$%^&*()_+-={}[]|\\:;\"'<>?,./ ".to_string());
-        headers.insert("unicode".to_string(), "αβγδε".to_string());
-        
-        let result = timeout(
-            Duration::from_millis(100),
-            async {
-                let mut producer = StompProducer::new(config).await?;
-                producer.send_queue_with_headers("test_queue", "test", headers).await
-            }
-        ).await;
-        
-        // Should timeout or fail due to no broker connection
-        assert!(result.is_err() || result.unwrap().is_err());
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
     }
 }

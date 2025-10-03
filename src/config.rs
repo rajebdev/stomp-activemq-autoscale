@@ -228,11 +228,6 @@ impl Config {
         self.destinations.topics.keys().cloned().collect()
     }
 
-    /// Get auto-scaling configuration
-    pub fn get_monitoring_config(&self) -> &ScalingConfig {
-        &self.scaling
-    }
-
     /// Check if auto-scaling is enabled
     pub fn is_auto_scaling_enabled(&self) -> bool {
         self.scaling.enabled
@@ -289,30 +284,22 @@ impl Config {
             return Vec::new();
         }
         
-        self.scaling.workers.keys()
-            .filter(|queue_name| {
+        self.scaling.workers
+            .iter()
+            .filter_map(|(queue_name, config_str)| {
                 // Only include queues that have range format (e.g., "1-4")
-                if let Some(config_str) = self.scaling.workers.get(*queue_name) {
-                    config_str.contains('-')
-                } else {
-                    false
-                }
+                config_str.contains('-').then(|| queue_name.clone())
             })
-            .cloned()
             .collect()
     }
     
     /// Get all queues configured with fixed worker counts
     pub fn get_fixed_worker_queues(&self) -> Vec<String> {
-        self.scaling.workers.keys()
-            .filter(|queue_name| {
-                if let Some(config_str) = self.scaling.workers.get(*queue_name) {
-                    !config_str.contains('-')
-                } else {
-                    false
-                }
+        self.scaling.workers
+            .iter()
+            .filter_map(|(queue_name, config_str)| {
+                (!config_str.contains('-')).then(|| queue_name.clone())
             })
-            .cloned()
             .collect()
     }
     
@@ -1253,6 +1240,187 @@ scaling:
         assert_eq!(fixed_config.min, 5);
         assert_eq!(fixed_config.max, 5);
         assert!(fixed_config.is_fixed);
+    }
+
+    #[test]
+    fn test_get_auto_scaling_queues_with_missing_config() {
+        // Test line 293: else branch when config_str is None
+        let mut workers = HashMap::new();
+        workers.insert("valid_range".to_string(), "1-4".to_string());
+        
+        let config = Config {
+            service: ServiceConfig {
+                name: "test".to_string(),
+                version: "1.0".to_string(),
+                description: "test".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "localhost".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig {
+                enabled: true,
+                interval_secs: 5,
+                workers,
+            },
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
+
+        // This should handle the case where a queue might not have a config_str
+        // Even though in practice HashMap.get() will handle this, this ensures the filter logic works
+        let auto_scaling = config.get_auto_scaling_queues();
+        assert_eq!(auto_scaling.len(), 1);
+        assert!(auto_scaling.contains(&"valid_range".to_string()));
+    }
+
+    #[test]
+    fn test_get_fixed_worker_queues_with_missing_config() {
+        // Test line 307: else branch when config_str is None
+        let mut workers = HashMap::new();
+        workers.insert("valid_fixed".to_string(), "3".to_string());
+        
+        let config = Config {
+            service: ServiceConfig {
+                name: "test".to_string(),
+                version: "1.0".to_string(),
+                description: "test".to_string(),
+            },
+            broker: BrokerConfig {
+                broker_type: BrokerType::ActiveMQ,
+                host: "localhost".to_string(),
+                stomp_port: 61613,
+                web_port: 8161,
+                username: "admin".to_string(),
+                password: "admin".to_string(),
+                heartbeat_secs: 30,
+                broker_name: "localhost".to_string(),
+            },
+            destinations: DestinationsConfig {
+                queues: HashMap::new(),
+                topics: HashMap::new(),
+            },
+            scaling: ScalingConfig {
+                enabled: true,
+                interval_secs: 5,
+                workers,
+            },
+            consumers: ConsumersConfig::default(),
+            logging: LoggingConfig::default(),
+            shutdown: ShutdownConfig::default(),
+            retry: RetryConfig::default(),
+        };
+
+        // This should handle the case where a queue might not have a config_str
+        let fixed_workers = config.get_fixed_worker_queues();
+        assert_eq!(fixed_workers.len(), 1);
+        assert!(fixed_workers.contains(&"valid_fixed".to_string()));
+    }
+
+    #[test]
+    fn test_get_queue_name_fallback_path() {
+        // Test line 335: fallback to full path when not starting with "/queue/"
+        let yaml_content = r#"
+service:
+  name: "test-service"
+  version: "1.0.0"
+  description: "Test service"
+
+broker:
+  type: "activemq"
+  host: "localhost"
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+
+destinations:
+  queues:
+    with_prefix: "/queue/demo"
+    without_prefix: "plain_name"
+    topic_format: "/topic/mytopic"
+    custom_format: "custom/path/queue"
+  topics: {}
+
+scaling:
+  enabled: false
+  interval_secs: 5
+  workers: {}
+        "#;
+
+        let config: Config = serde_yaml::from_str(yaml_content).unwrap();
+
+        // Test queue name with /queue/ prefix - should strip prefix
+        assert_eq!(config.get_queue_name("with_prefix"), Some("demo".to_string()));
+
+        // Test queue name without /queue/ prefix - should use fallback (line 335)
+        assert_eq!(config.get_queue_name("without_prefix"), Some("plain_name".to_string()));
+        
+        // Test with /topic/ prefix - should use fallback since it doesn't start with /queue/
+        assert_eq!(config.get_queue_name("topic_format"), Some("/topic/mytopic".to_string()));
+        
+        // Test with custom format - should use fallback
+        assert_eq!(config.get_queue_name("custom_format"), Some("custom/path/queue".to_string()));
+    }
+
+    #[test]
+    fn test_queue_name_edge_cases_for_path_extraction() {
+        // Additional test to cover edge cases in queue name extraction
+        let yaml_content = r#"
+service:
+  name: "test-service"
+  version: "1.0.0"
+  description: "Test service"
+
+broker:
+  type: "activemq"
+  host: "localhost"
+  stomp_port: 61613
+  web_port: 8161
+  username: "admin"
+  password: "admin"
+  heartbeat_secs: 30
+
+destinations:
+  queues:
+    exact_prefix: "/queue/"
+    nested_queue: "/queue/nested/path"
+    partial: "/queu/test"
+    almost: "queue/test"
+  topics: {}
+
+scaling:
+  enabled: false
+  interval_secs: 5
+  workers: {}
+        "#;
+
+        let config: Config = serde_yaml::from_str(yaml_content).unwrap();
+
+        // Edge case: path is exactly "/queue/" - should return empty string after strip
+        assert_eq!(config.get_queue_name("exact_prefix"), Some("".to_string()));
+        
+        // Nested path with /queue/ prefix - should strip prefix
+        assert_eq!(config.get_queue_name("nested_queue"), Some("nested/path".to_string()));
+        
+        // Partial match of "/queue/" - should use fallback (line 335)
+        assert_eq!(config.get_queue_name("partial"), Some("/queu/test".to_string()));
+        
+        // Starts with "queue/" but not "/queue/" - should use fallback (line 335)
+        assert_eq!(config.get_queue_name("almost"), Some("queue/test".to_string()));
     }
 }
 

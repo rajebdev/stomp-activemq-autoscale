@@ -39,7 +39,10 @@ Thumbs.db
 config.yaml
 sonar.env
 .scannerwork/
+.sonar_cache/
 build_rs_cov.profraw
 
 
 .wiki
+
+coverage.*
